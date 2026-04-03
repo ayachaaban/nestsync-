@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx vite:*)",
+      "Bash(nvm ls:*)",
+      "Bash(command -v nvm)",
+      "Read(//home/aya/.nvm/**)",
+      "Bash(source ~/.nvm/nvm.sh)",
+      "Bash(npm install:*)",
+      "Bash(cd:*)",
+      "Bash(cmd.exe /c \"npm install\")",
+      "Bash(cmd.exe /c \"node -v\" 2>&1)",
+      "Bash(cmd.exe /c \"cd /d \\\\\"C:\\\\Users\\\\Rak\\\\Desktop\\\\react project\\\\midterm\\\\\" && npm install\" 2>&1)",
+      "Bash(cmd.exe /c \"cd C:\\\\Users\\\\Rak\\\\Desktop && cd \\\\\"react project\\\\midterm\\\\\" && npm install\" 2>&1)",
+      "Bash(cmd.exe /c \"dir C:\\\\Users\\\\Rak\\\\Desktop\")",
+      "Bash(cmd.exe /c \"dir \\\\\"C:\\\\Users\\\\Rak\\\\Desktop\\\\react project\\\\\"\" 2>&1)",
+      "Bash(powershell.exe -Command \"Set-Location 'C:\\\\Users\\\\Rak\\\\Desktop\\\\react project\\\\midterm'; npm install\" 2>&1)",
+      "Bash(powershell.exe -Command \"Set-Location 'C:\\\\Users\\\\Rak\\\\Desktop\\\\react project\\\\midterm'; Remove-Item -Recurse -Force node_modules; Remove-Item -Force package-lock.json; npm install\" 2>&1)",
+      "Bash(powershell.exe -Command \"Set-Location 'C:\\\\Users\\\\Rak\\\\Desktop\\\\react project\\\\midterm'; npx vite build\" 2>&1)",
+      "Bash(node -e ':*)",
+      "Bash(ls /mnt/c/Users/Rak/Downloads/magic_edit*)",
+      "Bash(ls \"/mnt/c/Users/Rak/Downloads/\"magic_edit*)"
+    ]
+  }
+}
