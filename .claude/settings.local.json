@@ -19,7 +19,14 @@
       "Bash(powershell.exe -Command \"Set-Location 'C:\\\\Users\\\\Rak\\\\Desktop\\\\react project\\\\midterm'; npx vite build\" 2>&1)",
       "Bash(node -e ':*)",
       "Bash(ls /mnt/c/Users/Rak/Downloads/magic_edit*)",
-      "Bash(ls \"/mnt/c/Users/Rak/Downloads/\"magic_edit*)"
+      "Bash(ls \"/mnt/c/Users/Rak/Downloads/\"magic_edit*)",
+      "Bash(ls \"/mnt/c/Users/Rak/Downloads/magic_edit\"*)",
+      "Bash(node -e 'const esbuild = require\\('\\\\''esbuild'\\\\''\\); esbuild.transformSync\\(require\\('\\\\''fs'\\\\''\\).readFileSync\\('\\\\''__TRACKED_VAR__'\\\\'','\\\\''utf8'\\\\''\\), {loader:'\\\\''jsx'\\\\''}\\); console.log\\('\\\\''OK'\\\\''\\);')",
+      "Read(//tmp/**)",
+      "Bash(npm init:*)",
+      "Bash(node -e 'const eb=require\\('\\\\''/tmp/node_modules/esbuild-wasm'\\\\''\\); eb.transform\\(require\\('\\\\''fs'\\\\''\\).readFileSync\\('\\\\''__TRACKED_VAR__'\\\\'','\\\\''utf8'\\\\''\\),{loader:'\\\\''jsx'\\\\''}\\).then\\(\\(\\)=>console.log\\('\\\\''__TRACKED_VAR__ OK'\\\\''\\)\\).catch\\(e=>console.log\\('\\\\''__TRACKED_VAR__ FAIL:'\\\\'',e.message\\)\\)')",
+      "Bash(npx eslint:*)",
+      "Bash(wait)"
     ]
   }
 }

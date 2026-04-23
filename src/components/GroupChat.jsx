@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 
-function GroupChat({ user, messages, onSend }) {
+function GroupChat({ user, messages, onSend, groupName, embedded }) {
   const [text, setText] = useState('');
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState(null);
@@ -43,17 +43,12 @@ function GroupChat({ user, messages, onSend }) {
   };
 
   const roleColors = {
-    parent: '#E8B4D4',
-    staff: '#A8C9A0',
+    parent: '#C5B3D5',
+    staff: '#B8A5C8',
   };
 
-  return (
-    <div className="page-content">
-      <div className="page-header">
-        <h2>Group Chat</h2>
-        <p>Community chat between parents and staff</p>
-      </div>
-
+  const chatContent = (
+    <>
       <div className="chat-container">
         <div className="chat-messages">
           {messages.map((msg) => {
@@ -120,6 +115,18 @@ function GroupChat({ user, messages, onSend }) {
           </div>
         </form>
       </div>
+    </>
+  );
+
+  if (embedded) return chatContent;
+
+  return (
+    <div className="page-content menu-page-bg">
+      <div className="page-header">
+        <h2>Group Chat{groupName ? ` — ${groupName}` : ''}</h2>
+        <p>Chat with your child&apos;s class group</p>
+      </div>
+      {chatContent}
     </div>
   );
 }

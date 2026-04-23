@@ -7,71 +7,213 @@ import EventCalendar from '../components/EventCalendar';
 import StatsCard from '../components/StatsCard';
 import GroupChat from '../components/GroupChat';
 import ChildAvatar from '../components/ChildAvatar';
-import { children, activities } from '../data/mockData';
-
-function ParentHome({ user, notifications }) {
-  const myChildren = children.filter((c) => user.childIds?.includes(c.id));
+function ParentHome({ user, notifications, allChildren, dailyReports, calendarEvents, mediaUploads, registeredUsers }) {
+  const myChildren = (allChildren || []).filter((c) => user.childIds?.includes(c.id));
   const child = myChildren[0];
-  const childActivities = activities.filter((a) => a.childId === child?.id);
 
   if (!child) return <div className="page-content"><p>No child linked to your account.</p></div>;
 
-  const recentNotifs = notifications.filter((n) => !n.read).slice(0, 3);
+  // Look up the teacher live, by matching the child's group against currently
+  // registered staff. This way, if a staff member signs up after the parent did,
+  // the parent immediately sees the real teacher's name instead of "Not yet assigned".
+  const liveTeacher = (registeredUsers || []).find(
+    (u) => u.role === 'staff' && u.group === child.group
+  )?.name || 'Not yet assigned';
+
+  // Live data tied to this child only
+  const myReports = (dailyReports || []).filter((r) => r.childId === child.id);
+  const latestReport = myReports[0];
+  const myMedia = (mediaUploads || []).filter((m) => m.childId === child.id);
+  const recentMedia = myMedia.slice(0, 4);
+
+  const today = new Date().toISOString().slice(0, 10);
+  const upcomingEvents = (calendarEvents || [])
+    .filter((e) => e.date >= today)
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .slice(0, 3);
+
+  const unreadCount = (notifications || []).filter((n) => !n.read).length;
+
+  const moodLabel = {
+    happy: '😊 Happy',
+    calm: '😌 Calm',
+    tired: '😴 Tired',
+    fussy: '😤 Fussy',
+    energetic: '⚡ Energetic',
+  };
+  const portionLabel = { full: 'Full', half: 'Half', none: 'Skipped' };
+  const eventIcon = { event: '🎉', meeting: '👥', health: '🏥', offday: '🏖️' };
 
   return (
-    <div className="page-content">
+    <div className="page-content menu-page-bg">
       <div className="page-header">
         <h2>Welcome back, {user.name.split(' ')[0]}!</h2>
-        <p>Here&apos;s how {child.name} is doing today</p>
+        <p>Here&apos;s the latest from {child.name}&apos;s day at NestSync+</p>
       </div>
 
-      {recentNotifs.length > 0 && (
+      {unreadCount > 0 && (
         <div className="notif-banner">
-          <span className="notif-banner-icon">🔔</span>
-          <span>You have {recentNotifs.length} new notification{recentNotifs.length > 1 ? 's' : ''} — check the bell icon above.</span>
+          <span className="notif-banner-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+              <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+            </svg>
+          </span>
+          <span>You have {unreadCount} new notification{unreadCount > 1 ? 's' : ''} — check the bell icon above.</span>
         </div>
       )}
 
       <div className="stats-row">
-        <StatsCard icon="" label="Meals Today" value={childActivities.filter((a) => a.type === 'meal').length} color="#f59e0b" />
-        <StatsCard icon="" label="Naps Today" value={childActivities.filter((a) => a.type === 'nap').length} color="#6366f1" />
-        <StatsCard icon="🎨" label="Activities" value={childActivities.filter((a) => a.type === 'activity').length} color="#ec4899" />
-        <StatsCard icon="📋" label="Health Notes" value={childActivities.filter((a) => a.type === 'health').length} color="#ef4444" />
+        <StatsCard icon="" label="Daily Reports" value={myReports.length} color="#2b3a4e" />
+        <StatsCard icon="" label="Photos & Videos" value={myMedia.length} color="#7FA99B" />
+        <StatsCard icon="" label="Upcoming Events" value={upcomingEvents.length} color="#A8D5E2" />
+        <StatsCard icon="" label="Unread Alerts" value={unreadCount} color="#F5D78E" />
       </div>
 
       <div className="dashboard-grid">
+        {/* My Child profile */}
         <div className="card">
           <div className="card-header">
-            <h3>Today&apos;s Timeline</h3>
-            <span className="badge badge-blue">Live</span>
+            <h3>My Child</h3>
           </div>
-          <div className="activity-list">
-            {childActivities.map((a) => (
-              <ActivityCard key={a.id} activity={a} />
-            ))}
-          </div>
-        </div>
-
-        <div className="card-stack">
-          <div className="card child-profile-card">
-            <div className="child-profile">
-              <ChildAvatar avatar={child.avatar} name={child.name} size="lg" />
-              <div>
-                <h3>{child.name}</h3>
-                <p>Age: {child.age} years | Group: {child.group}</p>
-                <p>Blood Type: {child.bloodType} | Allergies: {child.allergies}</p>
+          <div className="dash-child-profile">
+            <ChildAvatar avatar={child.avatar} name={child.name} size="lg" />
+            <div className="dash-child-details">
+              <h3>{child.name}</h3>
+              <div className="dash-child-info-grid">
+                <div className="dash-child-info-item">
+                  <span className="dash-child-label">Age</span>
+                  <span className="dash-child-value">{child.age} years</span>
+                </div>
+                <div className="dash-child-info-item">
+                  <span className="dash-child-label">Group</span>
+                  <span className="dash-child-value">{child.group}</span>
+                </div>
+                <div className="dash-child-info-item">
+                  <span className="dash-child-label">Teacher</span>
+                  <span className="dash-child-value">{liveTeacher}</span>
+                </div>
+                <div className="dash-child-info-item">
+                  <span className="dash-child-label">Level</span>
+                  <span className="dash-child-value">{child.level || '—'}</span>
+                </div>
+                <div className="dash-child-info-item">
+                  <span className="dash-child-label">Blood Type</span>
+                  <span className="dash-child-value">{child.bloodType || '—'}</span>
+                </div>
+                <div className="dash-child-info-item">
+                  <span className="dash-child-label">Allergies</span>
+                  <span className="dash-child-value">{child.allergies || 'None'}</span>
+                </div>
               </div>
             </div>
           </div>
+        </div>
 
+        {/* Latest Daily Report */}
+        <div className="card">
+          <div className="card-header">
+            <h3>Latest Daily Report</h3>
+          </div>
+          <div className="dash-activity-list">
+            {latestReport ? (
+              <>
+                <div className="dash-activity-item">
+                  <div className="dash-activity-info">
+                    <strong>Mood</strong>
+                    <span>{moodLabel[latestReport.mood] || latestReport.mood}</span>
+                  </div>
+                  <span className="dash-activity-time">{latestReport.date}</span>
+                </div>
+                <div className="dash-activity-item">
+                  <div className="dash-activity-info">
+                    <strong>Meals</strong>
+                    <span>
+                      Breakfast: {portionLabel[latestReport.breakfast] || '—'} · Lunch: {portionLabel[latestReport.lunch] || '—'} · Snack: {portionLabel[latestReport.snack] || '—'}
+                    </span>
+                  </div>
+                </div>
+                {(latestReport.napFrom || latestReport.napTo) && (
+                  <div className="dash-activity-item">
+                    <div className="dash-activity-info">
+                      <strong>Nap</strong>
+                      <span>{latestReport.napFrom || '—'} — {latestReport.napTo || '—'}</span>
+                    </div>
+                  </div>
+                )}
+                {latestReport.itemsNeeded?.length > 0 && (
+                  <div className="dash-activity-item">
+                    <div className="dash-activity-info">
+                      <strong>📦 Items Needed</strong>
+                      <span>{latestReport.itemsNeeded.join(', ')}</span>
+                    </div>
+                  </div>
+                )}
+                <div className="dash-activity-item">
+                  <div className="dash-activity-info">
+                    <strong>Sent by</strong>
+                    <span>{latestReport.staffName}</span>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <p className="empty-state">No daily reports yet. Your teacher will send the first one soon.</p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="dashboard-grid">
+        {/* Upcoming Announcements */}
+        <div className="card">
+          <div className="card-header">
+            <h3>Upcoming Announcements</h3>
+          </div>
+          <div className="dash-activity-list">
+            {upcomingEvents.length > 0 ? (
+              upcomingEvents.map((e) => (
+                <div key={e.id} className="dash-activity-item">
+                  <div className="dash-activity-info">
+                    <strong>{eventIcon[e.type] || '📅'} {e.title}</strong>
+                    <span>{e.description || ''}</span>
+                  </div>
+                  <span className="dash-activity-time">{e.date}{e.time ? ` · ${e.time}` : ''}</span>
+                </div>
+              ))
+            ) : (
+              <p className="empty-state">No upcoming announcements right now.</p>
+            )}
+          </div>
+        </div>
+
+        {/* Recent Photos & Videos */}
+        <div className="card">
+          <div className="card-header">
+            <h3>Recent Photos &amp; Videos</h3>
+          </div>
+          <div className="dash-activity-list">
+            {recentMedia.length > 0 ? (
+              recentMedia.map((m) => (
+                <div key={m.id} className="dash-activity-item">
+                  <div className="dash-activity-info">
+                    <strong>{m.type === 'video' ? '🎬' : '📸'} {m.caption}</strong>
+                    <span>by {m.uploadedBy}</span>
+                  </div>
+                  <span className="dash-activity-time">{m.date}</span>
+                </div>
+              ))
+            ) : (
+              <p className="empty-state">No photos or videos yet. Teachers will share moments from {child.name}&apos;s day here.</p>
+            )}
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
-function ParentGallery({ user, mediaUploads }) {
-  const myChildren = children.filter((c) => user.childIds?.includes(c.id));
+function ParentGallery({ user, mediaUploads, allChildren }) {
+  const myChildren = (allChildren || []).filter((c) => user.childIds?.includes(c.id));
   const childPhotos = mediaUploads.filter((p) => myChildren.some((c) => c.id === p.childId));
 
   const handleDownload = (photo) => {
@@ -89,7 +231,7 @@ function ParentGallery({ user, mediaUploads }) {
   };
 
   return (
-    <div className="page-content">
+    <div className="page-content menu-page-bg">
       <div className="page-header">
         <h2>Photo & Video Gallery</h2>
         <p>Photos and moments from your child&apos;s day</p>
@@ -133,15 +275,18 @@ function ParentGallery({ user, mediaUploads }) {
   );
 }
 
-function ParentDailyReports({ user, dailyReports }) {
-  const myChildren = children.filter((c) => user.childIds?.includes(c.id));
+function ParentDailyReports({ user, dailyReports, allChildren }) {
+  const myChildren = (allChildren || []).filter((c) => user.childIds?.includes(c.id));
   const myReports = dailyReports.filter((r) => myChildren.some((c) => c.id === r.childId));
 
-  const moodIcons = { happy: '', calm: '', tired: '', fussy: '', energetic: '' };
-  const portionLabels = { full: '🟢 Full', half: '🟡 Half', none: '🔴 Didn\'t eat' };
+  const portionLabels = {
+    full: <><span className="portion-dot">🟢</span> Full</>,
+    half: <><span className="portion-dot">🟡</span> Half</>,
+    none: <><span className="portion-dot">🔴</span> Didn&apos;t eat</>,
+  };
 
   return (
-    <div className="page-content">
+    <div className="page-content menu-page-bg">
       <div className="page-header">
         <h2>Daily Reports</h2>
         <p>Reports from your child&apos;s teachers</p>
@@ -161,7 +306,6 @@ function ParentDailyReports({ user, dailyReports }) {
                   <span className="note-date">{r.date} — by {r.staffName}</span>
                 </div>
                 <div className="report-mood-badge">
-                  <span>{moodIcons[r.mood] || '😊'}</span>
                   <span>{r.mood}</span>
                 </div>
               </div>
@@ -199,7 +343,7 @@ function ParentDailyReports({ user, dailyReports }) {
                 {/* Items needed */}
                 {r.itemsNeeded && r.itemsNeeded.length > 0 && (
                   <div className="report-section">
-                    <strong>📦 Items Needed</strong>
+                    <strong>Items Needed</strong>
                     <div className="supply-items-list">
                       {r.itemsNeeded.map((item, i) => (
                         <span key={i} className="supply-tag">{item}</span>
@@ -210,7 +354,7 @@ function ParentDailyReports({ user, dailyReports }) {
                 {/* Notes */}
                 {r.notes && (
                   <div className="report-section">
-                    <strong>📝 Notes</strong>
+                    <strong>Notes</strong>
                     <p>{r.notes}</p>
                   </div>
                 )}
@@ -233,7 +377,7 @@ const DAYS = [
 
 function ParentSchedule({ weeklySchedule }) {
   return (
-    <div className="page-content">
+    <div className="page-content menu-page-bg">
       <div className="page-header">
         <h2>Weekly Schedule</h2>
         <p>Your child&apos;s class timetable for the week</p>
@@ -268,7 +412,7 @@ function ParentSchedule({ weeklySchedule }) {
 
 function ParentMenu({ weeklyMenu }) {
   return (
-    <div className="page-content">
+    <div className="page-content menu-page-bg">
       <div className="page-header">
         <h2>Weekly Menu</h2>
         <p>What your child eats during the week</p>
@@ -305,7 +449,7 @@ function ParentMenu({ weeklyMenu }) {
 
 function ParentCalendar({ calendarEvents }) {
   return (
-    <div className="page-content">
+    <div className="page-content menu-page-bg">
       <div className="page-header">
         <h2>Announcements</h2>
         <p>Events, meetings, days off, and important announcements</p>
@@ -315,7 +459,20 @@ function ParentCalendar({ calendarEvents }) {
   );
 }
 
-function ParentDashboard({ user, onLogout, notifications, onMarkRead, dailyReports, calendarEvents, mediaUploads, weeklySchedule, weeklyMenu, chatMessages, onSendChat }) {
+function ParentDashboard({ user, onLogout, notifications, onMarkRead, dailyReports, calendarEvents, mediaUploads, weeklySchedule, weeklyMenu, chatMessages, onSendChat, allChildren, registeredUsers }) {
+  const myChildren = (allChildren || []).filter((c) => user.childIds?.includes(c.id));
+  const myGroup = myChildren[0]?.group || 'Bumble Bees';
+  const groupMessages = chatMessages[myGroup] || [];
+
+  // Scope notifications to this parent only:
+  //  - Notifications without a childId are global (announcements, reminders) → keep
+  //  - Notifications with a childId are only kept if the child belongs to this parent
+  // This prevents a newly-signed-up parent from seeing another family's history.
+  const myChildIds = new Set(myChildren.map((c) => c.id));
+  const myNotifications = (notifications || []).filter(
+    (n) => !n.childId || myChildIds.has(n.childId)
+  );
+
   const sidebarLinks = [
     { to: '/parent', icon: '', label: 'Dashboard' },
     { to: '/parent/daily-reports', icon: '', label: 'Daily Reports' },
@@ -328,17 +485,17 @@ function ParentDashboard({ user, onLogout, notifications, onMarkRead, dailyRepor
 
   return (
     <div className="app-layout">
-      <Navbar user={user} onLogout={onLogout} notifications={notifications} onMarkRead={onMarkRead} />
+      <Navbar user={user} onLogout={onLogout} notifications={myNotifications} onMarkRead={onMarkRead} />
       <div className="app-body">
         <Sidebar links={sidebarLinks} />
         <main className="main-content">
           <Routes>
-            <Route index element={<ParentHome user={user} notifications={notifications} />} />
-            <Route path="daily-reports" element={<ParentDailyReports user={user} dailyReports={dailyReports} />} />
+            <Route index element={<ParentHome user={user} notifications={myNotifications} allChildren={allChildren} dailyReports={dailyReports} calendarEvents={calendarEvents} mediaUploads={mediaUploads} registeredUsers={registeredUsers} />} />
+            <Route path="daily-reports" element={<ParentDailyReports user={user} dailyReports={dailyReports} allChildren={allChildren} />} />
             <Route path="schedule" element={<ParentSchedule weeklySchedule={weeklySchedule} />} />
             <Route path="menu" element={<ParentMenu weeklyMenu={weeklyMenu} />} />
-            <Route path="gallery" element={<ParentGallery user={user} mediaUploads={mediaUploads} />} />
-            <Route path="group-chat" element={<GroupChat user={user} messages={chatMessages} onSend={onSendChat} />} />
+            <Route path="gallery" element={<ParentGallery user={user} mediaUploads={mediaUploads} allChildren={allChildren} />} />
+            <Route path="group-chat" element={<GroupChat user={user} messages={groupMessages} onSend={(msg) => onSendChat(myGroup, msg)} groupName={myGroup} />} />
             <Route path="calendar" element={<ParentCalendar calendarEvents={calendarEvents} />} />
             <Route path="*" element={<Navigate to="/parent" replace />} />
           </Routes>

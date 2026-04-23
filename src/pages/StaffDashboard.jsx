@@ -7,56 +7,174 @@ import ChildSelector from '../components/ChildSelector';
 import EventCalendar from '../components/EventCalendar';
 import GroupChat from '../components/GroupChat';
 import ChildAvatar from '../components/ChildAvatar';
-import { children, activities, attendance } from '../data/mockData';
-
+import { resizeImageFile } from '../utils/image';
 /* ───────────────────── DASHBOARD ───────────────────── */
 
-function StaffHome() {
-  const todayAttendance = attendance.filter((a) => a.date === '2026-04-01');
-  const present = todayAttendance.filter((a) => a.status === 'present').length;
-  const absent = todayAttendance.filter((a) => a.status === 'absent').length;
+function StaffHome({ user, groupChildren, dailyReports, mediaUploads, calendarEvents, weeklySchedule, weeklyMenu }) {
+  const myReports = (dailyReports || []).filter((r) => r.staffName === user.name);
+  const myMedia = (mediaUploads || []).filter((m) => m.uploadedBy === user.name);
+
+  const today = new Date();
+  const todayIso = today.toISOString().slice(0, 10);
+  const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const dayKeys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+  const validDays = ['mon', 'tue', 'wed', 'thu', 'fri'];
+  const rawKey = dayKeys[today.getDay()];
+  const todayKey = validDays.includes(rawKey) ? rawKey : 'mon';
+  const isWeekend = !validDays.includes(rawKey);
+  const dayLabel = isWeekend ? 'Monday (weekend preview)' : dayNames[today.getDay()];
+
+  const upcomingEvents = (calendarEvents || [])
+    .filter((e) => e.date >= todayIso)
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .slice(0, 3);
+
+  const recentReports = myReports.slice(0, 4);
+  const childrenWithoutReportToday = groupChildren.filter(
+    (c) => !myReports.some((r) => r.childId === c.id && r.date === todayIso)
+  );
+
+  const eventIcon = { event: '🎉', meeting: '👥', health: '🏥', offday: '🏖️' };
 
   return (
-    <div className="page-content">
+    <div className="page-content menu-page-bg">
       <div className="page-header">
-        <h2>Staff Dashboard</h2>
-        <p>Overview of today&apos;s nursery activities</p>
+        <h2>Hello {user.name.split(' ')[0]} 👋</h2>
+        <p>Today is {dayNames[today.getDay()]} — here&apos;s your {user.group || 'class'} overview</p>
       </div>
+
+      {childrenWithoutReportToday.length > 0 && groupChildren.length > 0 && !isWeekend && (
+        <div className="notif-banner">
+          <span className="notif-banner-icon">📋</span>
+          <span>
+            {childrenWithoutReportToday.length} child{childrenWithoutReportToday.length > 1 ? 'ren' : ''} still need a daily report today.
+          </span>
+        </div>
+      )}
 
       <div className="stats-row">
-        <StatsCard icon="" label="Total Children" value={children.length} color="#9cb89e" />
-        <StatsCard icon="" label="Present Today" value={present} color="#9cb89e" />
-        <StatsCard icon="" label="Absent Today" value={absent} color="#ef4444" />
-        <StatsCard icon="" label="Activities Logged" value={activities.filter((a) => a.date === '2026-04-01').length} color="#f59e0b" />
+        <StatsCard icon="" label="My Group Children" value={groupChildren.length} color="#2b3a4e" />
+        <StatsCard icon="" label="Reports Sent" value={myReports.length} color="#7FA99B" />
+        <StatsCard icon="" label="Media Uploaded" value={myMedia.length} color="#A8D5E2" />
+        <StatsCard icon="" label="Upcoming Events" value={upcomingEvents.length} color="#F5D78E" />
       </div>
 
-      <div className="card">
-        <div className="card-header">
-          <h3>Attendance Today</h3>
-        </div>
-        <table className="data-table">
-          <thead>
-            <tr><th>Child</th><th>Group</th><th>Status</th><th>Check-in</th><th>Check-out</th></tr>
-          </thead>
-          <tbody>
-            {children.map((child) => {
-              const record = todayAttendance.find((a) => a.childId === child.id);
-              return (
-                <tr key={child.id}>
-                  <td><span className="table-child"><ChildAvatar avatar={child.avatar} name={child.name} size="sm" /> {child.name}</span></td>
-                  <td>{child.group}</td>
-                  <td>
-                    <span className={`badge ${record?.status === 'present' ? 'badge-green' : 'badge-red'}`}>
-                      {record?.status || 'N/A'}
+      <div className="dashboard-grid">
+        {/* My Group children list */}
+        <div className="card">
+          <div className="card-header">
+            <h3>My Group — {user.group || '—'}</h3>
+          </div>
+          <div className="dash-activity-list">
+            {groupChildren.length > 0 ? (
+              groupChildren.map((c) => (
+                <div key={c.id} className="dash-activity-item">
+                  <ChildAvatar avatar={c.avatar} name={c.name} size="sm" />
+                  <div className="dash-activity-info">
+                    <strong>{c.name}</strong>
+                    <span>
+                      {c.age} years · {c.bloodType || '—'}
+                      {c.allergies && c.allergies !== 'None' ? ` · ⚠ ${c.allergies}` : ''}
                     </span>
-                  </td>
-                  <td>{record?.checkIn || '—'}</td>
-                  <td>{record?.checkOut || '—'}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <p className="empty-state">No children in your group yet. They will appear here once parents sign them up.</p>
+            )}
+          </div>
+        </div>
+
+        {/* Today's Schedule */}
+        <div className="card">
+          <div className="card-header">
+            <h3>Today&apos;s Schedule — {dayLabel}</h3>
+          </div>
+          <div className="dash-activity-list">
+            {weeklySchedule && weeklySchedule.length > 0 ? (
+              weeklySchedule.map((row, i) => (
+                <div key={i} className="dash-activity-item">
+                  <div className="dash-activity-info">
+                    <strong>{row[todayKey] || '—'}</strong>
+                    <span>{row.time}</span>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <p className="empty-state">No schedule set up yet. Add one in Weekly Schedule.</p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="dashboard-grid">
+        {/* Today's Menu */}
+        <div className="card">
+          <div className="card-header">
+            <h3>Today&apos;s Menu — {dayLabel}</h3>
+          </div>
+          <div className="dash-activity-list">
+            {weeklyMenu && weeklyMenu.length > 0 ? (
+              weeklyMenu.map((row, i) => (
+                <div key={i} className="dash-activity-item">
+                  <div className="dash-activity-info">
+                    <strong>{row.meal}</strong>
+                    <span>{row[todayKey] || '—'}</span>
+                  </div>
+                  <span className="dash-activity-time">{row.time}</span>
+                </div>
+              ))
+            ) : (
+              <p className="empty-state">No menu set up yet. Add one in Weekly Menu.</p>
+            )}
+          </div>
+        </div>
+
+        {/* My Recent Reports */}
+        <div className="card">
+          <div className="card-header">
+            <h3>My Recent Daily Reports</h3>
+          </div>
+          <div className="dash-activity-list">
+            {recentReports.length > 0 ? (
+              recentReports.map((r) => (
+                <div key={r.id} className="dash-activity-item">
+                  <div className="dash-activity-info">
+                    <strong>{r.childName}</strong>
+                    <span>Mood: {r.mood}</span>
+                  </div>
+                  <span className="dash-activity-time">{r.date}</span>
+                </div>
+              ))
+            ) : (
+              <p className="empty-state">You haven&apos;t sent any reports yet. Head to Daily Report to send your first one.</p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="dashboard-grid">
+        {/* Upcoming Announcements */}
+        <div className="card">
+          <div className="card-header">
+            <h3>Upcoming Announcements</h3>
+          </div>
+          <div className="dash-activity-list">
+            {upcomingEvents.length > 0 ? (
+              upcomingEvents.map((e) => (
+                <div key={e.id} className="dash-activity-item">
+                  <div className="dash-activity-info">
+                    <strong>{eventIcon[e.type] || '📅'} {e.title}</strong>
+                    <span>{e.description || ''}</span>
+                  </div>
+                  <span className="dash-activity-time">{e.date}{e.time ? ` · ${e.time}` : ''}</span>
+                </div>
+              ))
+            ) : (
+              <p className="empty-state">No upcoming announcements. Add one from the Announcements page.</p>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -65,12 +183,13 @@ function StaffHome() {
 /* ──────────────── DAILY REPORT ──────────────── */
 
 const PORTION_OPTIONS = [
-  { value: 'full', label: 'Full', icon: '🟢' },
-  { value: 'half', label: 'Half', icon: '🟡' },
-  { value: 'none', label: 'Didn\'t eat', icon: '🔴' },
+  { value: 'full', label: 'Full', icon: '' },
+  { value: 'half', label: 'Half', icon: '' },
+  { value: 'none', label: 'Didn\'t eat', icon: '' },
 ];
 
-function StaffDailyReport({ user, onAddReport }) {
+function StaffDailyReport({ user, onAddReport, groupChildren }) {
+  const children = groupChildren;
   const [selectedChild, setSelectedChild] = useState(children[0]?.id);
   const [sent, setSent] = useState(false);
 
@@ -131,7 +250,7 @@ function StaffDailyReport({ user, onAddReport }) {
   };
 
   return (
-    <div className="page-content">
+    <div className="page-content menu-page-bg">
       <div className="page-header">
         <h2>Daily Report</h2>
         <p>Fill in the daily report for each child and send it to their parents</p>
@@ -278,12 +397,15 @@ function StaffDailyReport({ user, onAddReport }) {
 
 /* ───────────────────── ATTENDANCE ───────────────────── */
 
-function StaffAttendance() {
+function StaffAttendance({ groupChildren }) {
+  const children = groupChildren;
   const [attendanceState, setAttendanceState] = useState(() => {
-    return children.map((child) => {
-      const record = attendance.find((a) => a.childId === child.id && a.date === '2026-04-01');
-      return { childId: child.id, status: record?.status || 'absent', checkIn: record?.checkIn || '', checkOut: record?.checkOut || '' };
-    });
+    return children.map((child) => ({
+      childId: child.id,
+      status: 'absent',
+      checkIn: '',
+      checkOut: '',
+    }));
   });
 
   const updateAttendance = (childId, field, value) => {
@@ -291,7 +413,7 @@ function StaffAttendance() {
   };
 
   return (
-    <div className="page-content">
+    <div className="page-content menu-page-bg">
       <div className="page-header">
         <h2>Attendance</h2>
         <p>Manage daily check-in and check-out</p>
@@ -329,7 +451,8 @@ function StaffAttendance() {
 
 /* ───────────────────── MEDIA UPLOAD ───────────────────── */
 
-function StaffMedia({ user, onAddMedia }) {
+function StaffMedia({ user, onAddMedia, groupChildren }) {
+  const children = groupChildren;
   const [selectedChild, setSelectedChild] = useState(children[0]?.id);
   const [mediaType, setMediaType] = useState('photo');
   const [caption, setCaption] = useState('');
@@ -337,17 +460,23 @@ function StaffMedia({ user, onAddMedia }) {
   const [preview, setPreview] = useState(null);
   const [uploaded, setUploaded] = useState([]);
 
-  const handleFileChange = (e) => {
+  const handleFileChange = async (e) => {
     const f = e.target.files[0];
     if (!f) return;
     setFile(f);
     if (f.type.startsWith('image/')) {
       setMediaType('photo');
-      const reader = new FileReader();
-      reader.onload = (ev) => setPreview(ev.target.result);
-      reader.readAsDataURL(f);
+      try {
+        // Resize media photos a bit larger than avatars so they look good in the gallery.
+        const dataUrl = await resizeImageFile(f, { maxEdge: 720, quality: 0.78 });
+        setPreview(dataUrl);
+      } catch {
+        setPreview(null);
+      }
     } else if (f.type.startsWith('video/')) {
       setMediaType('video');
+      // Object URLs don't survive a reload, but they keep videos out of localStorage
+      // (videos would blow the 5MB quota instantly).
       setPreview(URL.createObjectURL(f));
     }
   };
@@ -365,7 +494,7 @@ function StaffMedia({ user, onAddMedia }) {
   };
 
   return (
-    <div className="page-content">
+    <div className="page-content menu-page-bg">
       <div className="page-header">
         <h2>Media</h2>
         <p>Upload photos and videos for children — parents get notified</p>
@@ -463,7 +592,7 @@ function StaffSchedule({ weeklySchedule, onUpdateSchedule }) {
   const handleSave = () => { onUpdateSchedule(schedule); setSaved(true); setTimeout(() => setSaved(false), 3000); };
 
   return (
-    <div className="page-content">
+    <div className="page-content menu-page-bg">
       <div className="page-header">
         <h2>Weekly Schedule</h2>
         <p>Set the class timetable — click any cell to edit</p>
@@ -531,7 +660,7 @@ function StaffMenu({ weeklyMenu, onUpdateMenu }) {
   const handleSave = () => { onUpdateMenu(menu); setSaved(true); setTimeout(() => setSaved(false), 3000); };
 
   return (
-    <div className="page-content">
+    <div className="page-content menu-page-bg">
       <div className="page-header">
         <h2>Weekly Menu</h2>
         <p>Set the meal plan for each day — click any cell to edit</p>
@@ -583,7 +712,7 @@ function StaffMenu({ weeklyMenu, onUpdateMenu }) {
 
 function StaffCalendar({ calendarEvents, onAddEvent, onEditEvent, onDeleteEvent }) {
   return (
-    <div className="page-content">
+    <div className="page-content menu-page-bg">
       <div className="page-header">
         <h2>Announcements</h2>
         <p>Schedule events, meetings, days off, and health announcements</p>
@@ -593,9 +722,42 @@ function StaffCalendar({ calendarEvents, onAddEvent, onEditEvent, onDeleteEvent 
   );
 }
 
+/* ───────────────────── STAFF GROUP CHAT ───────────────────── */
+
+const GROUPS = ['Bumble Bees', 'Honey Bees', 'Busy Bees'];
+const GROUP_LABELS = { 'Bumble Bees': 'Preschool', 'Honey Bees': 'KG1', 'Busy Bees': 'KG2' };
+
+function StaffGroupChat({ user, chatMessages, onSendChat }) {
+  const [activeGroup, setActiveGroup] = useState(user.group || GROUPS[0]);
+  const groupMessages = chatMessages[activeGroup] || [];
+
+  return (
+    <div className="page-content menu-page-bg">
+      <div className="page-header">
+        <h2>Group Chat</h2>
+        <p>Chat with parents by class group</p>
+      </div>
+      <div className="group-tabs">
+        {GROUPS.map((g) => (
+          <button
+            key={g}
+            className={`group-tab ${activeGroup === g ? 'active' : ''}`}
+            onClick={() => setActiveGroup(g)}
+          >
+            {g} <span className="group-tab-level">({GROUP_LABELS[g]})</span>
+          </button>
+        ))}
+      </div>
+      <GroupChat user={user} messages={groupMessages} onSend={(msg) => onSendChat(activeGroup, msg)} groupName={activeGroup} embedded />
+    </div>
+  );
+}
+
 /* ───────────────────── MAIN LAYOUT ───────────────────── */
 
-function StaffDashboard({ user, onLogout, onAddReport, onAddEvent, onEditEvent, onDeleteEvent, onAddMedia, onUpdateSchedule, onUpdateMenu, calendarEvents, weeklySchedule, weeklyMenu, chatMessages, onSendChat }) {
+function StaffDashboard({ user, onLogout, onAddReport, onAddEvent, onEditEvent, onDeleteEvent, onAddMedia, onUpdateSchedule, onUpdateMenu, calendarEvents, weeklySchedule, weeklyMenu, chatMessages, onSendChat, allChildren, dailyReports, mediaUploads }) {
+  const groupChildren = (allChildren || []).filter((c) => !user.group || c.group === user.group);
+
   const sidebarLinks = [
     { to: '/staff', icon: '', label: 'Dashboard' },
     { to: '/staff/daily-report', icon: '', label: 'Daily Report' },
@@ -614,14 +776,14 @@ function StaffDashboard({ user, onLogout, onAddReport, onAddEvent, onEditEvent, 
         <Sidebar links={sidebarLinks} />
         <main className="main-content">
           <Routes>
-            <Route index element={<StaffHome />} />
-            <Route path="daily-report" element={<StaffDailyReport user={user} onAddReport={onAddReport} />} />
+            <Route index element={<StaffHome user={user} groupChildren={groupChildren} dailyReports={dailyReports} mediaUploads={mediaUploads} calendarEvents={calendarEvents} weeklySchedule={weeklySchedule} weeklyMenu={weeklyMenu} />} />
+            <Route path="daily-report" element={<StaffDailyReport user={user} onAddReport={onAddReport} groupChildren={groupChildren} />} />
             <Route path="schedule" element={<StaffSchedule weeklySchedule={weeklySchedule} onUpdateSchedule={onUpdateSchedule} />} />
             <Route path="menu" element={<StaffMenu weeklyMenu={weeklyMenu} onUpdateMenu={onUpdateMenu} />} />
-            <Route path="attendance" element={<StaffAttendance />} />
-            <Route path="media" element={<StaffMedia user={user} onAddMedia={onAddMedia} />} />
+            <Route path="attendance" element={<StaffAttendance groupChildren={groupChildren} />} />
+            <Route path="media" element={<StaffMedia user={user} onAddMedia={onAddMedia} groupChildren={groupChildren} />} />
             <Route path="calendar" element={<StaffCalendar calendarEvents={calendarEvents} onAddEvent={onAddEvent} onEditEvent={onEditEvent} onDeleteEvent={onDeleteEvent} />} />
-            <Route path="group-chat" element={<GroupChat user={user} messages={chatMessages} onSend={onSendChat} />} />
+            <Route path="group-chat" element={<StaffGroupChat user={user} chatMessages={chatMessages} onSendChat={onSendChat} />} />
             <Route path="*" element={<Navigate to="/staff" replace />} />
           </Routes>
         </main>

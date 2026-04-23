@@ -1,7 +1,7 @@
 function StatsCard({ icon, label, value, color }) {
   return (
-    <div className="stats-card">
-      <div className="stats-icon" style={{ background: color + '20', color }}>
+    <div className="stats-card" style={{ background: color + '30' }}>
+      <div className="stats-icon">
         {icon}
       </div>
       <div className="stats-info">

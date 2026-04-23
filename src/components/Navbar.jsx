@@ -13,8 +13,9 @@ function Navbar({ user, onLogout, notifications = [], onMarkRead }) {
   const unreadCount = notifications.filter((n) => !n.read).length;
 
   const roleColors = {
-    parent: '#C5C9E0',
-    staff: '#059669',
+    parent: '#C5B3D5',
+    staff: '#B8A5C8',
+    admin: '#F5D78E',
   };
 
   return (
@@ -23,10 +24,13 @@ function Navbar({ user, onLogout, notifications = [], onMarkRead }) {
         <span className="navbar-title">NestSync+</span>
       </div>
       <div className="navbar-user">
-        {notifications.length > 0 && (
+        {onMarkRead && (
           <div className="notif-wrapper">
             <button className="notif-bell" onClick={() => setShowNotifs(!showNotifs)}>
-              🔔
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+                <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+              </svg>
               {unreadCount > 0 && <span className="notif-count">{unreadCount}</span>}
             </button>
             {showNotifs && (
@@ -46,7 +50,7 @@ function Navbar({ user, onLogout, notifications = [], onMarkRead }) {
                         onClick={() => { if (onMarkRead) onMarkRead(n.id); }}
                       >
                         <span className="notif-icon">
-                          {n.type === 'report' ? '📋' : n.type === 'supply' ? '📦' : n.type === 'media' ? '📸' : n.type === 'announcement' ? '📢' : '🔔'}
+                          {n.type === 'report' ? '📋' : n.type === 'supply' ? '📦' : n.type === 'media' ? '📸' : n.type === 'announcement' ? '📢' : n.type === 'reminder' ? '⏰' : '🔔'}
                         </span>
                         <div className="notif-content">
                           <strong>{n.title}</strong>
@@ -65,7 +69,7 @@ function Navbar({ user, onLogout, notifications = [], onMarkRead }) {
           {user.role}
         </span>
         <span className="navbar-name">{user.name}</span>
-        <button className="btn btn-outline btn-sm" onClick={handleLogout}>
+        <button className="btn btn-logout" onClick={handleLogout}>
           Logout
         </button>
       </div>

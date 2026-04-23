@@ -1,10 +1,10 @@
 import { useState } from 'react';
 
 const typeStyles = {
-  event: { color: '#9a9cc0', bg: '#e8e9f3', icon: '🎉', label: 'Event' },
-  meeting: { color: '#f59e0b', bg: '#fef3c7', icon: '🤝', label: 'Meeting' },
-  health: { color: '#ef4444', bg: '#fee2e2', icon: '🏥', label: 'Health' },
-  offday: { color: '#6b7280', bg: '#f3f4f6', icon: '🚫', label: 'Day Off' },
+  event: { color: '#C5B3D5', bg: '#C5B3D530', icon: '🎉', label: 'Event' },
+  meeting: { color: '#C5B3D5', bg: '#C5B3D530', icon: '👥', label: 'Meeting' },
+  health: { color: '#C5B3D5', bg: '#C5B3D530', icon: '🩺', label: 'Health' },
+  offday: { color: '#C5B3D5', bg: '#C5B3D530', icon: '🚫', label: 'Day Off' },
 };
 
 const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -128,7 +128,7 @@ function EventCalendar({ events, editable, onAddEvent, onEditEvent, onDeleteEven
                 <label>Category</label>
                 <div className="cal-type-selector">
                   {Object.entries(typeStyles).map(([key, style]) => (
-                    <button key={key} type="button" className={`cal-type-btn ${formData.type === key ? 'active' : ''}`} style={formData.type === key ? { borderColor: style.color, background: style.bg, color: style.color } : {}} onClick={() => setFormData({ ...formData, type: key })}>
+                    <button key={key} type="button" className={`cal-type-btn ${formData.type === key ? 'active' : ''}`} style={formData.type === key ? { borderColor: '#F5D78E', background: '#F5D78E30', color: '#2b3a4e' } : {}} onClick={() => setFormData({ ...formData, type: key })}>
                       {style.icon} {style.label}
                     </button>
                   ))}
@@ -177,8 +177,8 @@ function EventCalendar({ events, editable, onAddEvent, onEditEvent, onDeleteEven
                     </div>
                     {editable && (
                       <div className="cal-event-actions">
-                        <button className="cal-action-btn edit" onClick={() => openEditForm(event)} title="Edit">✏️</button>
-                        <button className="cal-action-btn delete" onClick={() => handleDelete(event.id)} title="Delete">🗑️</button>
+                        <button className="cal-action-btn edit" onClick={() => openEditForm(event)} title="Edit">📝</button>
+                        <button className="cal-action-btn delete" onClick={() => handleDelete(event.id)} title="Delete">❌</button>
                       </div>
                     )}
                   </div>

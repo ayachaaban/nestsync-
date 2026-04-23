@@ -1,22 +1,36 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import { resizeImageFile } from '../utils/image';
 
-// Auto-assignment mapping based on age
-const getLevelInfo = (dob) => {
+// Auto-assignment mapping based on age. Teacher is looked up from the
+// live registered staff list (whoever signed up as that group's leader).
+const getLevelInfo = (dob, registeredUsers = []) => {
   if (!dob) return null;
   const today = new Date();
   const birth = new Date(dob);
-  let age = today.getFullYear() - birth.getFullYear();
-  const monthDiff = today.getMonth() - birth.getMonth();
-  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) {
-    age--;
+  let years = today.getFullYear() - birth.getFullYear();
+  let months = today.getMonth() - birth.getMonth();
+  if (today.getDate() < birth.getDate()) {
+    months--;
   }
-  if (age < 4) return { age, level: 'Preschool', group: 'Bumble Bees', teacher: 'Nora Khalid' };
-  if (age === 4) return { age, level: 'KG1', group: 'Honey Bees', teacher: 'Layla Ibrahim' };
-  return { age, level: 'KG2', group: 'Busy Bees', teacher: 'Nora Khalid' };
+  if (months < 0) {
+    years--;
+    months += 12;
+  }
+  const ageLabel = `${years} year${years === 1 ? '' : 's'}${months > 0 ? ` and ${months} month${months === 1 ? '' : 's'}` : ''}`;
+
+  let level, group;
+  if (years < 4) { level = 'Preschool'; group = 'Bumble Bees'; }
+  else if (years === 4) { level = 'KG1'; group = 'Honey Bees'; }
+  else { level = 'KG2'; group = 'Busy Bees'; }
+
+  const groupStaff = registeredUsers.find((u) => u.role === 'staff' && u.group === group);
+  const teacher = groupStaff ? groupStaff.name : 'Not yet assigned';
+
+  return { age: years, months, ageLabel, level, group, teacher };
 };
 
-function Signup({ onSignup }) {
+function Signup({ onSignup, registeredUsers = [] }) {
   const navigate = useNavigate();
   const [form, setForm] = useState({
     name: '',
@@ -29,18 +43,20 @@ function Signup({ onSignup }) {
     childGender: '',
     childGroup: 'Bumble Bees',
     childPhoto: '',
-    staffGroup: '',
+    childBloodType: '',
+    childHasAllergies: 'no',
+    childAllergies: '',
   });
   const [error, setError] = useState('');
   const [step, setStep] = useState(1);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
 
-  const levelInfo = getLevelInfo(form.childDob);
+  const levelInfo = getLevelInfo(form.childDob, registeredUsers);
 
   const updateField = (field, value) => {
     if (field === 'childDob') {
-      const info = getLevelInfo(value);
+      const info = getLevelInfo(value, registeredUsers);
       setForm({ ...form, childDob: value, childGroup: info ? info.group : 'Bumble Bees' });
     } else {
       setForm({ ...form, [field]: value });
@@ -65,19 +81,16 @@ function Signup({ onSignup }) {
       if (!form.childGender) return setError('Please select your child\'s gender');
       if (!form.childDob) return setError('Please select your child\'s date of birth');
       if (!levelInfo || levelInfo.age < 2 || levelInfo.age > 6) return setError('Child must be between 2 and 6 years old');
+      if (!form.childBloodType) return setError('Please select your child\'s blood type');
+      if (form.childHasAllergies === 'yes' && !form.childAllergies.trim()) return setError('Please describe your child\'s allergies');
     }
-    if (form.role === 'staff' && !form.staffGroup) {
-      return setError('Please select your group');
-    }
-
     const newUser = {
       id: Date.now(),
       name: form.name,
       email: form.email,
       password: form.password,
-      role: form.role,
-      ...(form.role === 'staff' && { group: form.staffGroup }),
-      ...(form.role === 'parent' && {
+      role: 'parent',
+      ...({
         childIds: [Date.now() + 1],
         child: {
           id: Date.now() + 1,
@@ -85,12 +98,13 @@ function Signup({ onSignup }) {
           dob: form.childDob,
           gender: form.childGender,
           age: levelInfo.age,
+          ageMonths: levelInfo.months,
           level: levelInfo.level,
           group: levelInfo.group,
           teacher: levelInfo.teacher,
           avatar: form.childPhoto || '',
-          allergies: 'None',
-          bloodType: 'N/A',
+          allergies: form.childHasAllergies === 'yes' ? form.childAllergies.trim() : 'None',
+          bloodType: form.childBloodType,
         },
       }),
     };
@@ -102,29 +116,16 @@ function Signup({ onSignup }) {
   return (
     <div className="login-page signup-page">
       <div className="login-container signup-container">
-        <div className="login-header">
-          <h1>NestSync+</h1>
-          <p>Create your account</p>
-        </div>
-
         {step === 1 && (
-          <>
-            <p className="role-select-label">I am a</p>
-            <div className="quick-login">
-              <button type="button" className={`btn btn-demo parent ${form.role === 'parent' ? 'active' : ''}`} onClick={() => updateField('role', 'parent')}>
-                Parent
-              </button>
-              <button type="button" className={`btn btn-demo staff ${form.role === 'staff' ? 'active' : ''}`} onClick={() => updateField('role', 'staff')}>
-                Staff
-              </button>
-            </div>
-          </>
+          <div className="login-header">
+            <h1 style={{ fontSize: '24px', whiteSpace: 'nowrap' }}>Create your account</h1>
+          </div>
         )}
 
         {error && <div className="login-error">{error}</div>}
 
         {step === 1 && (
-          <form className="login-form" onSubmit={handleNext}>
+          <form className="login-form" onSubmit={handleNext} autoComplete="off">
             <div className="form-group">
               <label htmlFor="name">Full Name</label>
               <input
@@ -134,6 +135,7 @@ function Signup({ onSignup }) {
                 onChange={(e) => updateField('name', e.target.value)}
                 placeholder="Enter your full name"
                 required
+                autoComplete="off"
               />
             </div>
             <div className="form-group">
@@ -145,6 +147,9 @@ function Signup({ onSignup }) {
                 onChange={(e) => updateField('email', e.target.value)}
                 placeholder="Enter your email"
                 required
+                autoComplete="off"
+                autoCorrect="off"
+                spellCheck="false"
               />
             </div>
             <div className="form-group">
@@ -157,6 +162,7 @@ function Signup({ onSignup }) {
                   onChange={(e) => updateField('password', e.target.value)}
                   placeholder="At least 6 characters"
                   required
+                  autoComplete="new-password"
                 />
                 <button
                   type="button"
@@ -177,6 +183,7 @@ function Signup({ onSignup }) {
                   onChange={(e) => updateField('confirmPassword', e.target.value)}
                   placeholder="Confirm your password"
                   required
+                  autoComplete="new-password"
                 />
                 <button
                   type="button"
@@ -213,12 +220,14 @@ function Signup({ onSignup }) {
                     id="child-photo"
                     type="file"
                     accept="image/*"
-                    onChange={(e) => {
+                    onChange={async (e) => {
                       const file = e.target.files[0];
-                      if (file) {
-                        const reader = new FileReader();
-                        reader.onloadend = () => updateField('childPhoto', reader.result);
-                        reader.readAsDataURL(file);
+                      if (!file) return;
+                      try {
+                        const dataUrl = await resizeImageFile(file, { maxEdge: 240, quality: 0.75 });
+                        updateField('childPhoto', dataUrl);
+                      } catch {
+                        setError('Could not process that image — try a different photo.');
                       }
                     }}
                   />
@@ -264,13 +273,69 @@ function Signup({ onSignup }) {
                     required
                   />
                 </div>
+                <div className="form-group">
+                  <label htmlFor="child-blood-type">Blood Type</label>
+                  <select
+                    id="child-blood-type"
+                    value={form.childBloodType}
+                    onChange={(e) => updateField('childBloodType', e.target.value)}
+                    required
+                  >
+                    <option value="">Select blood type</option>
+                    <option value="A+">A+</option>
+                    <option value="A-">A-</option>
+                    <option value="B+">B+</option>
+                    <option value="B-">B-</option>
+                    <option value="AB+">AB+</option>
+                    <option value="AB-">AB-</option>
+                    <option value="O+">O+</option>
+                    <option value="O-">O-</option>
+                    <option value="unknown">I don&apos;t know</option>
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label>Does your child have any allergies?</label>
+                  <div className="choice-selector">
+                    <button
+                      type="button"
+                      className={`choice-option ${form.childHasAllergies === 'no' ? 'active no' : ''}`}
+                      onClick={() => updateField('childHasAllergies', 'no')}
+                      aria-pressed={form.childHasAllergies === 'no'}
+                    >
+                      <span className="choice-icon">✓</span>
+                      <span>No allergies</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`choice-option ${form.childHasAllergies === 'yes' ? 'active yes' : ''}`}
+                      onClick={() => updateField('childHasAllergies', 'yes')}
+                      aria-pressed={form.childHasAllergies === 'yes'}
+                    >
+                      <span className="choice-icon">!</span>
+                      <span>Yes, has allergies</span>
+                    </button>
+                  </div>
+                </div>
+                {form.childHasAllergies === 'yes' && (
+                  <div className="form-group">
+                    <label htmlFor="child-allergies">List allergies</label>
+                    <input
+                      id="child-allergies"
+                      type="text"
+                      value={form.childAllergies}
+                      onChange={(e) => updateField('childAllergies', e.target.value)}
+                      placeholder="e.g. Peanuts, Dairy, Pollen"
+                      required
+                    />
+                  </div>
+                )}
                 {levelInfo && (
                   <div className="auto-assign-info">
                     <h4>Auto-Assigned Details</h4>
                     <div className="assign-grid">
                       <div className="assign-item">
                         <span className="assign-label">Age</span>
-                        <span className="assign-value">{levelInfo.age} years</span>
+                        <span className="assign-value">{levelInfo.ageLabel}</span>
                       </div>
                       <div className="assign-item">
                         <span className="assign-label">Level</span>
@@ -290,30 +355,6 @@ function Signup({ onSignup }) {
               </>
             )}
 
-            {form.role === 'staff' && (
-              <>
-                <div className="role-detail-header">
-                  <h3>Staff Registration</h3>
-                  <p>Select the group you are leading</p>
-                </div>
-                <div className="form-group">
-                  <label htmlFor="staff-group">Group Leader Of</label>
-                  <select
-                    id="staff-group"
-                    value={form.staffGroup}
-                    onChange={(e) => updateField('staffGroup', e.target.value)}
-                    required
-                  >
-                    <option value="">Select group</option>
-                    <option value="Bumble Bees">Bumble Bees (Preschool)</option>
-                    <option value="Honey Bees">Honey Bees (KG1)</option>
-                    <option value="Busy Bees">Busy Bees (KG2)</option>
-                  </select>
-                </div>
-              </>
-            )}
-
-
 <div className="signup-actions">
               <button type="button" className="btn btn-outline" onClick={() => { setStep(1); setError(''); }}>
                 Back
@@ -325,9 +366,11 @@ function Signup({ onSignup }) {
           </form>
         )}
 
-        <div className="login-footer">
-          <p>Already have an account? <Link to="/">Sign In</Link></p>
-        </div>
+        {step === 1 && (
+          <div className="login-footer">
+            <p>Already have an account? <Link to="/">Sign In</Link></p>
+          </div>
+        )}
       </div>
     </div>
   );
