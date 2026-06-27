@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { resizeImageFile } from '../utils/image';
+import { authApi } from '../api';
 
 // Auto-assignment mapping based on age. Teacher is looked up from the
 // live registered staff list (whoever signed up as that group's leader).
@@ -73,7 +74,7 @@ function Signup({ onSignup, registeredUsers = [] }) {
     setStep(2);
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
 
     if (form.role === 'parent') {
@@ -84,33 +85,46 @@ function Signup({ onSignup, registeredUsers = [] }) {
       if (!form.childBloodType) return setError('Please select your child\'s blood type');
       if (form.childHasAllergies === 'yes' && !form.childAllergies.trim()) return setError('Please describe your child\'s allergies');
     }
-    const newUser = {
-      id: Date.now(),
+
+    // Build the payload for the API — matches the backend's SignupDto.
+    const payload = {
       name: form.name,
       email: form.email,
       password: form.password,
       role: 'parent',
-      ...({
-        childIds: [Date.now() + 1],
-        child: {
-          id: Date.now() + 1,
-          name: form.childName,
-          dob: form.childDob,
-          gender: form.childGender,
-          age: levelInfo.age,
-          ageMonths: levelInfo.months,
-          level: levelInfo.level,
-          group: levelInfo.group,
-          teacher: levelInfo.teacher,
-          avatar: form.childPhoto || '',
-          allergies: form.childHasAllergies === 'yes' ? form.childAllergies.trim() : 'None',
-          bloodType: form.childBloodType,
-        },
-      }),
+      childName: form.childName,
+      childDob: form.childDob,
+      childGender: form.childGender,
+      childAge: levelInfo.age,
+      childAgeMonths: levelInfo.months,
+      childLevel: levelInfo.level,
+      childGroup: levelInfo.group,
+      childTeacher: levelInfo.teacher,
+      childAvatar: form.childPhoto || null,
+      childAllergies: form.childHasAllergies === 'yes' ? form.childAllergies.trim() : 'None',
+      childBloodType: form.childBloodType,
     };
 
-    onSignup(newUser);
-    navigate(`/${newUser.role}`);
+    try {
+      // The API returns: { id, name, email, role, child }
+      const apiUser = await authApi.signup(payload);
+
+      // Shape the response so the rest of the app keeps working.
+      const newUser = {
+        id: apiUser.id,
+        name: apiUser.name,
+        email: apiUser.email,
+        password: form.password,             // kept in memory only (for legacy code)
+        role: apiUser.role,
+        childIds: apiUser.child ? [apiUser.child.id] : [],
+        child: apiUser.child,
+      };
+
+      onSignup(newUser);
+      navigate(`/${newUser.role}`);
+    } catch (err) {
+      setError(err.message || 'Could not create account');
+    }
   };
 
   return (

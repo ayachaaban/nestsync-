@@ -4,6 +4,7 @@ import Navbar from '../components/Navbar';
 import Sidebar from '../components/Sidebar';
 import StatsCard from '../components/StatsCard';
 import EventCalendar from '../components/EventCalendar';
+import { usersApi } from '../api';
 
 const GROUPS = ['Bumble Bees', 'Honey Bees', 'Busy Bees'];
 const GROUP_LABELS = { 'Bumble Bees': 'Preschool', 'Honey Bees': 'KG1', 'Busy Bees': 'KG2' };
@@ -162,7 +163,7 @@ function AdminManageStaff({ registeredUsers, setRegisteredUsers }) {
     setShowPassword(false);
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setFormError('');
     if (!formData.name.trim()) return setFormError('Name is required');
@@ -177,24 +178,45 @@ function AdminManageStaff({ registeredUsers, setRegisteredUsers }) {
     if (emailTaken) return setFormError('This email is already in use');
     if (formData.email === 'admin@nestsync.com') return setFormError('This email is reserved');
 
-    if (editingStaff) {
-      setRegisteredUsers((prev) =>
-        prev.map((u) => (u.id === editingStaff.id ? { ...u, ...formData } : u))
-      );
-    } else {
-      const newStaff = {
-        id: Date.now(),
-        role: 'staff',
-        ...formData,
-      };
-      setRegisteredUsers((prev) => [...prev, newStaff]);
+    try {
+      if (editingStaff) {
+        // UPDATE via API — saves to SQL Server
+        const updated = await usersApi.update(editingStaff.id, {
+          name: formData.name,
+          email: formData.email,
+          password: formData.password,
+          role: 'staff',
+          group: formData.group,
+        });
+        setRegisteredUsers((prev) =>
+          prev.map((u) => (u.id === editingStaff.id ? updated : u))
+        );
+      } else {
+        // CREATE via API — saves to SQL Server
+        const created = await usersApi.create({
+          name: formData.name,
+          email: formData.email,
+          password: formData.password,
+          role: 'staff',
+          group: formData.group,
+        });
+        setRegisteredUsers((prev) => [...prev, created]);
+      }
+      closeForm();
+    } catch (err) {
+      setFormError(err.message || 'Could not save staff member');
     }
-    closeForm();
   };
 
-  const handleDelete = (id) => {
-    setRegisteredUsers((prev) => prev.filter((u) => u.id !== id));
-    setConfirmDelete(null);
+  const handleDelete = async (id) => {
+    try {
+      await usersApi.delete(id);   // saves deletion to SQL Server
+      setRegisteredUsers((prev) => prev.filter((u) => u.id !== id));
+      setConfirmDelete(null);
+    } catch (err) {
+      // eslint-disable-next-line no-alert
+      alert(err.message || 'Could not delete staff member');
+    }
   };
 
   return (
@@ -317,12 +339,18 @@ function AdminManageParents({ registeredUsers, setRegisteredUsers, registeredChi
   const getChildren = (parent) =>
     (registeredChildren || []).filter((c) => parent.childIds?.includes(c.id));
 
-  const handleDelete = (parent) => {
-    // Remove parent's children first, then the parent account
-    const childIds = new Set(parent.childIds || []);
-    setRegisteredChildren((prev) => prev.filter((c) => !childIds.has(c.id)));
-    setRegisteredUsers((prev) => prev.filter((u) => u.id !== parent.id));
-    setConfirmDelete(null);
+  const handleDelete = async (parent) => {
+    try {
+      // The API's DELETE /users/{id} automatically removes the parent's children too.
+      await usersApi.delete(parent.id);
+      const childIds = new Set(parent.childIds || []);
+      setRegisteredChildren((prev) => prev.filter((c) => !childIds.has(c.id)));
+      setRegisteredUsers((prev) => prev.filter((u) => u.id !== parent.id));
+      setConfirmDelete(null);
+    } catch (err) {
+      // eslint-disable-next-line no-alert
+      alert(err.message || 'Could not delete parent');
+    }
   };
 
   return (
@@ -427,11 +455,14 @@ function AdminAnnouncements({ calendarEvents, onAddEvent, onEditEvent, onDeleteE
 
 /* ───────────────────── SYSTEM OVERVIEW ───────────────────── */
 
-function AdminSystemOverview({ dailyReports, mediaUploads, chatMessages, calendarEvents, weeklySchedule, weeklyMenu }) {
+function AdminSystemOverview({ user, dailyReports, mediaUploads, onAddMedia, onDeleteMedia, chatMessages, calendarEvents, onAddEvent, onEditEvent, onDeleteEvent, weeklySchedule, weeklyMenu, onUpdateSchedule, onUpdateMenu, registeredChildren }) {
   const [activeTab, setActiveTab] = useState('reports');
 
-  const moodLabel = { happy: 'Happy', calm: 'Calm', tired: 'Tired', fussy: 'Fussy', energetic: 'Energetic' };
-  const portionLabel = { full: 'Full', half: 'Half', none: 'Skipped' };
+  const portionLabels = {
+    full: <><span className="portion-dot">🟢</span> Full</>,
+    half: <><span className="portion-dot">🟡</span> Half</>,
+    none: <><span className="portion-dot">🔴</span> Didn&apos;t eat</>,
+  };
 
   const tabs = [
     { key: 'reports', label: 'Daily Reports' },
@@ -446,7 +477,7 @@ function AdminSystemOverview({ dailyReports, mediaUploads, chatMessages, calenda
     <div className="page-content menu-page-bg">
       <div className="page-header">
         <h2>System Overview</h2>
-        <p>Read-only view of all system data across groups</p>
+        <p>Manage all system data across groups</p>
       </div>
 
       <div className="admin-tabs">
@@ -457,7 +488,7 @@ function AdminSystemOverview({ dailyReports, mediaUploads, chatMessages, calenda
         ))}
       </div>
 
-      {/* Daily Reports */}
+      {/* Daily Reports — full parent-style view */}
       {activeTab === 'reports' && (
         <div className="card">
           <div className="card-header"><h3>All Daily Reports ({dailyReports.length})</h3></div>
@@ -480,15 +511,38 @@ function AdminSystemOverview({ dailyReports, mediaUploads, chatMessages, calenda
                     <div className="report-section">
                       <strong>Meals</strong>
                       <div className="report-meals-row">
-                        <span>Breakfast: {portionLabel[r.breakfast] || '—'}</span>
-                        <span>Lunch: {portionLabel[r.lunch] || '—'}</span>
-                        <span>Snack: {portionLabel[r.snack] || '—'}</span>
+                        <span>Breakfast: {portionLabels[r.breakfast] || '—'}</span>
+                        <span>Lunch: {portionLabels[r.lunch] || '—'}</span>
+                        <span>Snack: {portionLabels[r.snack] || '—'}</span>
                       </div>
                     </div>
                     {(r.napFrom || r.napTo) && (
                       <div className="report-section">
                         <strong>Nap</strong>
-                        <p>{r.napFrom || '—'} — {r.napTo || '—'}</p>
+                        <p>{r.napFrom && r.napTo ? `${r.napFrom} — ${r.napTo}` : r.napFrom || r.napTo}{r.napNotes ? ` · ${r.napNotes}` : ''}</p>
+                      </div>
+                    )}
+                    {r.diapers && r.diapers.length > 0 && (
+                      <div className="report-section">
+                        <strong>Diaper Changes ({r.diapers.length})</strong>
+                        <div className="diaper-summary">
+                          {r.diapers.map((d, i) => (
+                            <span key={i} className={`diaper-tag ${d.type}`}>
+                              {d.type === 'wet' ? '💧 Wet' : d.type === 'soiled' ? '💩 Soiled' : '💧💩 Both'}
+                              {d.time ? ` at ${d.time}` : ''}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {r.itemsNeeded && r.itemsNeeded.length > 0 && (
+                      <div className="report-section">
+                        <strong>Items Needed</strong>
+                        <div className="supply-items-list">
+                          {r.itemsNeeded.map((item, i) => (
+                            <span key={i} className="supply-tag">{item}</span>
+                          ))}
+                        </div>
                       </div>
                     )}
                     {r.notes && (
@@ -505,41 +559,9 @@ function AdminSystemOverview({ dailyReports, mediaUploads, chatMessages, calenda
         </div>
       )}
 
-      {/* Media */}
+      {/* Media — with upload + delete */}
       {activeTab === 'media' && (
-        <div className="card">
-          <div className="card-header"><h3>All Media ({mediaUploads.length})</h3></div>
-          {mediaUploads.length === 0 ? (
-            <p className="empty-state">No media uploaded yet.</p>
-          ) : (
-            <div className="gallery-grid">
-              {mediaUploads.map((m) => (
-                <div key={m.id} className="gallery-item">
-                  {m.url && m.type === 'photo' ? (
-                    <div className="gallery-image">
-                      <img src={m.url} alt={m.caption} />
-                      <span className="media-badge">Photo</span>
-                    </div>
-                  ) : m.url && m.type === 'video' ? (
-                    <div className="gallery-image">
-                      <video src={m.url} controls />
-                      <span className="media-badge">Video</span>
-                    </div>
-                  ) : (
-                    <div className="gallery-placeholder">
-                      {m.type === 'video' ? 'Video' : 'Photo'}
-                      <span className="media-badge">{m.type === 'video' ? 'Video' : 'Photo'}</span>
-                    </div>
-                  )}
-                  <div className="gallery-info">
-                    <p>{m.caption}</p>
-                    <span>{m.date} — {m.childName} — by {m.uploadedBy}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        <AdminMediaTab user={user} mediaUploads={mediaUploads} onAddMedia={onAddMedia} onDeleteMedia={onDeleteMedia} registeredChildren={registeredChildren} />
       )}
 
       {/* Chat Logs */}
@@ -575,65 +597,145 @@ function AdminSystemOverview({ dailyReports, mediaUploads, chatMessages, calenda
         </div>
       )}
 
-      {/* Calendar */}
+      {/* Calendar — editable (add/edit/delete events) */}
       {activeTab === 'calendar' && (
-        <EventCalendar events={calendarEvents} />
+        <EventCalendar events={calendarEvents} editable onAddEvent={(e) => onAddEvent({ ...e, author: 'Admin' })} onEditEvent={onEditEvent} onDeleteEvent={onDeleteEvent} />
       )}
 
-      {/* Schedule */}
+      {/* Schedule — editable */}
       {activeTab === 'schedule' && (
-        <div className="card">
-          <div className="weekly-table-wrap">
-            <table className="weekly-table readonly">
-              <thead>
-                <tr>
-                  <th className="wt-time-col">Time</th>
-                  {DAYS.map((d) => <th key={d.key}>{d.label}</th>)}
-                </tr>
-              </thead>
-              <tbody>
-                {weeklySchedule.map((row, i) => (
-                  <tr key={i}>
-                    <td className="wt-time-cell">{row.time}</td>
-                    {DAYS.map((d) => (
-                      <td key={d.key} className="wt-cell">
-                        <span className="wt-cell-text">{row[d.key] || '—'}</span>
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        <AdminScheduleEditor weeklySchedule={weeklySchedule} onUpdateSchedule={onUpdateSchedule} />
+      )}
+
+      {/* Menu — editable */}
+      {activeTab === 'menu' && (
+        <AdminMenuEditor weeklyMenu={weeklyMenu} onUpdateMenu={onUpdateMenu} />
+      )}
+    </div>
+  );
+}
+
+/* ───────────────── ADMIN: Media (upload + delete) ───────────────── */
+function AdminMediaTab({ user, mediaUploads, onAddMedia, onDeleteMedia, registeredChildren }) {
+  const [showForm, setShowForm] = useState(false);
+  const [selectedChild, setSelectedChild] = useState('');
+  const [caption, setCaption] = useState('');
+  const [mediaType, setMediaType] = useState('photo');
+  const [preview, setPreview] = useState(null);
+  const [confirmDelete, setConfirmDelete] = useState(null);
+
+  const handleFile = (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    if (f.type.startsWith('image/')) {
+      setMediaType('photo');
+      const reader = new FileReader();
+      reader.onloadend = () => setPreview(reader.result);
+      reader.readAsDataURL(f);
+    } else if (f.type.startsWith('video/')) {
+      setMediaType('video');
+      setPreview(URL.createObjectURL(f));
+    }
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!caption.trim() || !selectedChild) return;
+    const child = registeredChildren.find((c) => c.id === Number(selectedChild));
+    onAddMedia({
+      childId: Number(selectedChild),
+      childName: child?.name || '',
+      uploadedBy: user.name,
+      caption,
+      type: mediaType,
+      url: preview || '',
+    });
+    setCaption('');
+    setPreview(null);
+    setSelectedChild('');
+    setShowForm(false);
+  };
+
+  return (
+    <div className="card">
+      <div className="card-header">
+        <h3>All Media ({mediaUploads.length})</h3>
+        <button className="btn btn-primary btn-sm" onClick={() => setShowForm(!showForm)}>
+          {showForm ? 'Cancel' : '+ Upload Media'}
+        </button>
+      </div>
+
+      {showForm && (
+        <form onSubmit={handleSubmit} style={{ padding: '16px' }}>
+          <div className="form-group">
+            <label>Child</label>
+            <select value={selectedChild} onChange={(e) => setSelectedChild(e.target.value)} required>
+              <option value="">Select child</option>
+              {registeredChildren.map((c) => (
+                <option key={c.id} value={c.id}>{c.name} ({c.group})</option>
+              ))}
+            </select>
           </div>
+          <div className="form-group">
+            <label>Caption</label>
+            <input type="text" value={caption} onChange={(e) => setCaption(e.target.value)} placeholder="e.g. Playing with blocks" required />
+          </div>
+          <div className="form-group">
+            <label>File</label>
+            <input type="file" accept="image/*,video/*" onChange={handleFile} />
+          </div>
+          {preview && mediaType === 'photo' && <img src={preview} alt="preview" style={{ maxWidth: '200px', borderRadius: '8px' }} />}
+          {preview && mediaType === 'video' && <video src={preview} controls style={{ maxWidth: '300px' }} />}
+          <div style={{ marginTop: '12px' }}>
+            <button type="submit" className="btn btn-primary">Upload</button>
+          </div>
+        </form>
+      )}
+
+      {mediaUploads.length === 0 ? (
+        <p className="empty-state">No media uploaded yet.</p>
+      ) : (
+        <div className="gallery-grid">
+          {mediaUploads.map((m) => (
+            <div key={m.id} className="gallery-item">
+              {m.url && m.type === 'photo' ? (
+                <div className="gallery-image">
+                  <img src={m.url} alt={m.caption} />
+                  <span className="media-badge">Photo</span>
+                </div>
+              ) : m.url && m.type === 'video' ? (
+                <div className="gallery-image">
+                  <video src={m.url} controls />
+                  <span className="media-badge">Video</span>
+                </div>
+              ) : (
+                <div className="gallery-placeholder">
+                  {m.type === 'video' ? 'Video' : 'Photo'}
+                  <span className="media-badge">{m.type === 'video' ? 'Video' : 'Photo'}</span>
+                </div>
+              )}
+              <div className="gallery-info">
+                <p>{m.caption}</p>
+                <span>{m.date} — {m.childName} — by {m.uploadedBy}</span>
+                <button className="btn btn-danger btn-sm" style={{ marginTop: '8px' }} onClick={() => setConfirmDelete(m)}>Delete</button>
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
-      {/* Menu */}
-      {activeTab === 'menu' && (
-        <div className="card">
-          <div className="weekly-table-wrap">
-            <table className="weekly-table menu-table readonly">
-              <thead>
-                <tr>
-                  <th className="wt-meal-col">Meal</th>
-                  <th className="wt-mealtime-col">Time</th>
-                  {DAYS.map((d) => <th key={d.key}>{d.label}</th>)}
-                </tr>
-              </thead>
-              <tbody>
-                {weeklyMenu.map((row, i) => (
-                  <tr key={i}>
-                    <td className="wt-meal-cell">{row.meal}</td>
-                    <td className="wt-mealtime-cell">{row.time}</td>
-                    {DAYS.map((d) => (
-                      <td key={d.key} className="wt-cell">
-                        <span className="wt-cell-text">{row[d.key] || '—'}</span>
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      {confirmDelete && (
+        <div className="modal-overlay" onClick={() => setConfirmDelete(null)}>
+          <div className="modal-content confirm-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Delete Media</h3>
+              <button type="button" className="modal-close" onClick={() => setConfirmDelete(null)}>×</button>
+            </div>
+            <p className="confirm-text">Delete this {confirmDelete.type}? This cannot be undone.</p>
+            <div className="modal-actions">
+              <button className="btn btn-secondary" onClick={() => setConfirmDelete(null)}>Cancel</button>
+              <button className="btn btn-danger" onClick={() => { onDeleteMedia(confirmDelete.id); setConfirmDelete(null); }}>Delete</button>
+            </div>
           </div>
         </div>
       )}
@@ -641,9 +743,128 @@ function AdminSystemOverview({ dailyReports, mediaUploads, chatMessages, calenda
   );
 }
 
+/* ───────────────── ADMIN: Schedule editor ───────────────── */
+function AdminScheduleEditor({ weeklySchedule, onUpdateSchedule }) {
+  const [schedule, setSchedule] = useState(weeklySchedule);
+  const [editCell, setEditCell] = useState(null);
+  const [editValue, setEditValue] = useState('');
+  const [saved, setSaved] = useState(false);
+
+  const startEdit = (rowIdx, dayKey) => { setEditCell({ rowIdx, dayKey }); setEditValue(schedule[rowIdx][dayKey]); };
+  const saveEdit = () => { if (!editCell) return; setSchedule(schedule.map((row, i) => i === editCell.rowIdx ? { ...row, [editCell.dayKey]: editValue } : row)); setEditCell(null); };
+  const handleKeyDown = (e) => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') setEditCell(null); };
+  const addRow = () => setSchedule([...schedule, { time: '', mon: '', tue: '', wed: '', thu: '', fri: '' }]);
+  const removeRow = (idx) => setSchedule(schedule.filter((_, i) => i !== idx));
+  const updateTime = (idx, val) => setSchedule(schedule.map((row, i) => i === idx ? { ...row, time: val } : row));
+  const handleSave = () => { onUpdateSchedule(schedule); setSaved(true); setTimeout(() => setSaved(false), 3000); };
+
+  return (
+    <div className="card">
+      <div className="card-header">
+        <h3>Class Timetable</h3>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          {saved && <span className="badge badge-green">Saved!</span>}
+          <button className="btn btn-save-schedule btn-sm" onClick={handleSave}>Save</button>
+        </div>
+      </div>
+      <div className="weekly-table-wrap">
+        <table className="weekly-table">
+          <thead>
+            <tr>
+              <th className="wt-time-col">Time</th>
+              {DAYS.map((d) => <th key={d.key}>{d.label}</th>)}
+              <th className="wt-action-col"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {schedule.map((row, rowIdx) => (
+              <tr key={rowIdx}>
+                <td className="wt-time-cell">
+                  <input type="text" className="wt-time-input" value={row.time} onChange={(e) => updateTime(rowIdx, e.target.value)} placeholder="e.g. 8:00 - 8:30" />
+                </td>
+                {DAYS.map((d) => (
+                  <td key={d.key} className={`wt-cell ${editCell?.rowIdx === rowIdx && editCell?.dayKey === d.key ? 'editing' : ''}`} onClick={() => startEdit(rowIdx, d.key)}>
+                    {editCell?.rowIdx === rowIdx && editCell?.dayKey === d.key ? (
+                      <input className="wt-cell-input" value={editValue} onChange={(e) => setEditValue(e.target.value)} onBlur={saveEdit} onKeyDown={handleKeyDown} autoFocus />
+                    ) : (
+                      <span className="wt-cell-text">{row[d.key] || <span className="wt-empty">—</span>}</span>
+                    )}
+                  </td>
+                ))}
+                <td className="wt-action-col">
+                  <button className="wt-remove-btn" onClick={() => removeRow(rowIdx)} title="Remove row">✕</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div style={{ padding: '12px 16px' }}>
+        <button className="btn btn-outline btn-sm" onClick={addRow}>+ Add Time Slot</button>
+      </div>
+    </div>
+  );
+}
+
+/* ───────────────── ADMIN: Menu editor ───────────────── */
+function AdminMenuEditor({ weeklyMenu, onUpdateMenu }) {
+  const [menu, setMenu] = useState(weeklyMenu);
+  const [editCell, setEditCell] = useState(null);
+  const [editValue, setEditValue] = useState('');
+  const [saved, setSaved] = useState(false);
+
+  const startEdit = (rowIdx, dayKey) => { setEditCell({ rowIdx, dayKey }); setEditValue(menu[rowIdx][dayKey]); };
+  const saveEdit = () => { if (!editCell) return; setMenu(menu.map((row, i) => i === editCell.rowIdx ? { ...row, [editCell.dayKey]: editValue } : row)); setEditCell(null); };
+  const handleKeyDown = (e) => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') setEditCell(null); };
+  const updateMealTime = (idx, val) => setMenu(menu.map((row, i) => i === idx ? { ...row, time: val } : row));
+  const handleSave = () => { onUpdateMenu(menu); setSaved(true); setTimeout(() => setSaved(false), 3000); };
+
+  return (
+    <div className="card">
+      <div className="card-header">
+        <h3>Meal Plan</h3>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          {saved && <span className="badge badge-green">Saved!</span>}
+          <button className="btn btn-save-menu btn-sm" onClick={handleSave}>Save</button>
+        </div>
+      </div>
+      <div className="weekly-table-wrap">
+        <table className="weekly-table menu-table">
+          <thead>
+            <tr>
+              <th className="wt-meal-col">Meal</th>
+              <th className="wt-mealtime-col">Time</th>
+              {DAYS.map((d) => <th key={d.key}>{d.label}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {menu.map((row, rowIdx) => (
+              <tr key={rowIdx}>
+                <td className="wt-meal-cell">{row.meal}</td>
+                <td className="wt-mealtime-cell">
+                  <input type="text" className="wt-time-input" value={row.time} onChange={(e) => updateMealTime(rowIdx, e.target.value)} />
+                </td>
+                {DAYS.map((d) => (
+                  <td key={d.key} className={`wt-cell ${editCell?.rowIdx === rowIdx && editCell?.dayKey === d.key ? 'editing' : ''}`} onClick={() => startEdit(rowIdx, d.key)}>
+                    {editCell?.rowIdx === rowIdx && editCell?.dayKey === d.key ? (
+                      <input className="wt-cell-input" value={editValue} onChange={(e) => setEditValue(e.target.value)} onBlur={saveEdit} onKeyDown={handleKeyDown} autoFocus />
+                    ) : (
+                      <span className="wt-cell-text">{row[d.key] || <span className="wt-empty">—</span>}</span>
+                    )}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 /* ───────────────────── MAIN LAYOUT ───────────────────── */
 
-function AdminDashboard({ user, onLogout, registeredUsers, setRegisteredUsers, registeredChildren, setRegisteredChildren, dailyReports, calendarEvents, onAddEvent, onEditEvent, onDeleteEvent, mediaUploads, chatMessages, weeklySchedule, weeklyMenu, notifications }) {
+function AdminDashboard({ user, onLogout, registeredUsers, setRegisteredUsers, registeredChildren, setRegisteredChildren, dailyReports, calendarEvents, onAddEvent, onEditEvent, onDeleteEvent, mediaUploads, onAddMedia, onDeleteMedia, chatMessages, weeklySchedule, weeklyMenu, onUpdateSchedule, onUpdateMenu, notifications }) {
   const sidebarLinks = [
     { to: '/admin', icon: '', label: 'Home' },
     { to: '/admin/manage-staff', icon: '', label: 'Manage Staff' },
@@ -663,7 +884,7 @@ function AdminDashboard({ user, onLogout, registeredUsers, setRegisteredUsers, r
             <Route path="manage-staff" element={<AdminManageStaff registeredUsers={registeredUsers} setRegisteredUsers={setRegisteredUsers} />} />
             <Route path="manage-parents" element={<AdminManageParents registeredUsers={registeredUsers} setRegisteredUsers={setRegisteredUsers} registeredChildren={registeredChildren} setRegisteredChildren={setRegisteredChildren} />} />
             <Route path="announcements" element={<AdminAnnouncements calendarEvents={calendarEvents} onAddEvent={onAddEvent} onEditEvent={onEditEvent} onDeleteEvent={onDeleteEvent} />} />
-            <Route path="system-overview" element={<AdminSystemOverview dailyReports={dailyReports} mediaUploads={mediaUploads} chatMessages={chatMessages} calendarEvents={calendarEvents} weeklySchedule={weeklySchedule} weeklyMenu={weeklyMenu} />} />
+            <Route path="system-overview" element={<AdminSystemOverview user={user} dailyReports={dailyReports} mediaUploads={mediaUploads} onAddMedia={onAddMedia} onDeleteMedia={onDeleteMedia} chatMessages={chatMessages} calendarEvents={calendarEvents} onAddEvent={onAddEvent} onEditEvent={onEditEvent} onDeleteEvent={onDeleteEvent} weeklySchedule={weeklySchedule} weeklyMenu={weeklyMenu} onUpdateSchedule={onUpdateSchedule} onUpdateMenu={onUpdateMenu} registeredChildren={registeredChildren} />} />
             <Route path="*" element={<Navigate to="/admin" replace />} />
           </Routes>
         </main>

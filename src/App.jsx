@@ -1,13 +1,25 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
 import ParentDashboard from './pages/ParentDashboard';
 import StaffDashboard from './pages/StaffDashboard';
 import AdminDashboard from './pages/AdminDashboard';
+import {
+  usersApi,
+  childrenApi,
+  reportsApi,
+  eventsApi,
+  mediaApi,
+  chatApi,
+  scheduleApi,
+  menuApi,
+  notificationsApi,
+} from './api';
 import './App.css';
 
 // Hardcoded admin account — cannot be created or deleted from the UI.
+// Still local because admin sign-in needs to work even if the API is offline.
 const ADMIN_ACCOUNT = {
   id: 'admin',
   name: 'Admin',
@@ -16,69 +28,23 @@ const ADMIN_ACCOUNT = {
   role: 'admin',
 };
 
-// One-time wipe: clears all stored data so the app starts completely fresh.
-// Bump STORAGE_VERSION any time you want to force every browser to wipe again.
-//only wipe if we're in a browser and the saved version is different from the current one.
-const STORAGE_VERSION = 'v5-admin';
-if (typeof window !== 'undefined' && localStorage.getItem('nestsync_version') !== STORAGE_VERSION) {
-  [
-    'nestsync_users',         // Holds: all registered parent/staff accounts
-    'nestsync_children',      // Holds: all registered children
-    'nestsync_chat',          // Holds: all chat messages per group
-    'nestsync_user',          // Holds: the currently logged-in user
-    'nestsync_events',        // Holds: calendar announcements
-    'nestsync_media',         // Holds: uploaded photos/videos
-    'nestsync_reports',       // Holds: daily reports
-    'nestsync_notifications', // Holds: bell notifications
-    'nestsync_schedule',      // Holds: weekly schedule
-    'nestsync_menu',          // Holds: weekly menu
-  ].forEach((k) => localStorage.removeItem(k));
-  // .forEach goes through the array one item at a time. For each key "k",
-  // it calls localStorage.removeItem(k) — so all 10 keys above get deleted.
-  // Save the current version so next time the app loads it won't wipe again.
-  //btsir l storage version v5-admin fa ma3ach bifout aal if w bltele ma3ach bymhe
-  //wa ella bisir bado yemhe 3end kl page 
-  //Without this line, the app would wipe localStorage on every single page load forever, because the version would never be saved.
-
-
-  localStorage.setItem('nestsync_version', STORAGE_VERSION);
-}
-
-//loadState is a function that reads saved data from the browser's storage. If nothing is saved, it gives back a default value.
-//localStorage can only store text. So your data is saved as a string:
-//loadState uses JSON.parse() to convert the text back into a real array/object you can use
-const loadState = (key, defaultValue) => {
+// We keep ONLY the logged-in user in localStorage, so a page refresh doesn't
+// kick the user back to the login screen. All other data now lives in the API.
+const loadUser = () => {
   try {
-    const saved = localStorage.getItem(key);
-    return saved ? JSON.parse(saved) : defaultValue;
+    const saved = localStorage.getItem('nestsync_user');
+    return saved ? JSON.parse(saved) : null;
   } catch {
-    return defaultValue;
+    return null;
   }
 };
 
-// Helper: save to localStorage; warn (not crash) if quota is exceeded.
-//saveState turns data into text and saves it in the browser. If it can't save (storage full), it just warns you instead of crashing.
-
-const saveState = (key, value) => {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch (err) {
-    // eslint-disable-next-line no-console
-    console.warn(`Could not save "${key}" to localStorage:`, err?.message || err);
-  }
-};
-//The [] just means "empty list of messages."
-//for each group there is a list of messages, and by default that list is empty.
-// // When you send a message to a group, it gets added to that group's list.
-// // When you open the chat for a group, it shows all the messages in that group's list.
+// Defaults used if the database is empty (first run).
 const defaultChat = {
   'Bumble Bees': [],
   'Honey Bees': [],
   'Busy Bees': [],
 };
-//What it is: the starter weekly timetable — a list of 11 time slots, each with an activity for Monday through Friday.
-
-
 const defaultSchedule = [
   { time: '7:30 - 8:00', mon: 'Welcoming', tue: 'Welcoming', wed: 'Welcoming', thu: 'Welcoming', fri: 'Welcoming' },
   { time: '8:00 - 8:30', mon: 'Free Play', tue: 'Free Play', wed: 'Free Play', thu: 'Free Play', fri: 'Free Play' },
@@ -92,204 +58,344 @@ const defaultSchedule = [
   { time: '12:00 - 1:00', mon: 'Free Play', tue: 'Free Play', wed: 'Free Play', thu: 'Free Play', fri: 'Free Play' },
   { time: '1:00', mon: 'Pick Up', tue: 'Pick Up', wed: 'Pick Up', thu: 'Pick Up', fri: 'Pick Up' },
 ];
-//What it is: the starter meal plan — 3 meals (Breakfast, Lunch, Snack), each with different food for each weekday.
-
-
 const defaultMenu = [
   { meal: 'Breakfast', time: '9:30 AM', mon: 'Cereal & Milk', tue: 'Toast & Jam', wed: 'Oatmeal & Berries', thu: 'Pancakes', fri: 'Eggs & Bread' },
   { meal: 'Lunch', time: '11:30 AM', mon: 'Chicken & Rice', tue: 'Pasta & Sauce', wed: 'Fish & Vegetables', thu: 'Beef Stew', fri: 'Pizza & Salad' },
   { meal: 'Snack', time: '1:00 PM', mon: 'Apple Slices', tue: 'Crackers & Cheese', wed: 'Yogurt', thu: 'Banana', fri: 'Cookies & Juice' },
 ];
 
+// The API stores notifications with "isRead" (C# convention). Our existing
+// components read "read". This helper maps API → UI shape.
+const mapNotification = (n) => ({ ...n, read: n.isRead });
+
+// The API stores daily reports with "breakfastPortion"/"lunchPortion"/"snackPortion".
+// Existing components read "breakfast"/"lunch"/"snack". This helper adds aliases.
+// Also parses JSON strings for diapers + itemsNeeded back into arrays.
+const safeParseJson = (s, fallback) => {
+  if (!s) return fallback;
+  try { return JSON.parse(s); } catch { return fallback; }
+};
+
+const mapReport = (r) => ({
+  ...r,
+  breakfast: r.breakfastPortion,
+  lunch: r.lunchPortion,
+  snack: r.snackPortion,
+  // The C# DiaperDto serializes with PascalCase, so we normalize keys to lowercase
+  // (the React component reads d.type, d.time).
+  diapers: safeParseJson(r.diapersJson, []).map((d) => ({
+    type: d.type || d.Type || 'wet',
+    time: d.time || d.Time || '',
+  })),
+  itemsNeeded: safeParseJson(r.itemsNeededJson, []),
+});
+
+// The API stores chat messages with "senderName"/"senderRole".
+// GroupChat reads "sender"/"role". This helper adds aliases.
+const mapChatMessage = (m) => ({
+  ...m,
+  sender: m.senderName,
+  role: m.senderRole,
+  message: m.text,    // some places read msg.message instead of msg.text
+});
 
 function App() {
-//loadState('nestsync_users', [])
-//You give the worker 2 things:
-//Which drawer to open → 'nestsync_users'
-  //What to bring back if the drawer is empty → [] (empty list)
+  // ----- STATE -----
+  const [user, setUser] = useState(loadUser);
+  const [registeredUsers, setRegisteredUsers] = useState([]);            // for admin dashboard
+  const [registeredChildren, setRegisteredChildren] = useState([]);
+  const [notifications, setNotifications] = useState([]);
+  const [dailyReports, setDailyReports] = useState([]);
+  const [calendarEvents, setCalendarEvents] = useState([]);
+  const [mediaUploads, setMediaUploads] = useState([]);
+  const [chatMessages, setChatMessages] = useState(defaultChat);
+  const [weeklySchedule, setWeeklySchedule] = useState(defaultSchedule);
+  const [weeklyMenu, setWeeklyMenu] = useState(defaultMenu);
 
-  //loadState only reads the saved data. useState is React's memory 
-  //it holds the data, tracks changes, and re-renders the UI automatically when you update it with the setter function.
-  // That's why we store loadState's result inside useState.
-  const [user, setUser] = useState(() => loadState('nestsync_user', null));
-  const [registeredUsers, setRegisteredUsers] = useState(() => loadState('nestsync_users', []));
-  const [registeredChildren, setRegisteredChildren] = useState(() => loadState('nestsync_children', []));
-  const [notifications, setNotifications] = useState(() => loadState('nestsync_notifications', []));
-  const [dailyReports, setDailyReports] = useState(() => loadState('nestsync_reports', []));
-  const [calendarEvents, setCalendarEvents] = useState(() => loadState('nestsync_events', []));
-  const [mediaUploads, setMediaUploads] = useState(() => loadState('nestsync_media', []));
-  const [chatMessages, setChatMessages] = useState(() => loadState('nestsync_chat', defaultChat));
-  const [weeklySchedule, setWeeklySchedule] = useState(() => loadState('nestsync_schedule', defaultSchedule));
-
-  // Save all state to localStorage whenever it changes
-  //useEffect is a React hook that runs code automatically when something changes.
-  //These useEffect lines auto-save each piece of state to localStorage whenever it changes./
-  //That's how the app remembers everything between page refreshes — no manual saving needed.
-  useEffect(() => { saveState('nestsync_user', user); }, [user]);
-  useEffect(() => { saveState('nestsync_users', registeredUsers); }, [registeredUsers]);
-  useEffect(() => { saveState('nestsync_children', registeredChildren); }, [registeredChildren]);
-  useEffect(() => { saveState('nestsync_notifications', notifications); }, [notifications]);
-  useEffect(() => { saveState('nestsync_reports', dailyReports); }, [dailyReports]);
-  useEffect(() => { saveState('nestsync_events', calendarEvents); }, [calendarEvents]);
-  useEffect(() => { saveState('nestsync_media', mediaUploads); }, [mediaUploads]);
-  useEffect(() => { saveState('nestsync_chat', chatMessages); }, [chatMessages]);
-  useEffect(() => { saveState('nestsync_schedule', weeklySchedule); }, [weeklySchedule]);
-
-  // Reminder system: when an event is exactly 1 day away, drop a reminder
-  // notification into the bell. We dedupe by eventId so the same event never
-  // produces more than one reminder, even across reloads.
+  // Persist the logged-in user so refreshes don't kick them out.
   useEffect(() => {
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const tomorrowStr = tomorrow.toISOString().slice(0, 10);
+    if (user) localStorage.setItem('nestsync_user', JSON.stringify(user));
+    else localStorage.removeItem('nestsync_user');
+  }, [user]);
 
-    setNotifications((prev) => {
-      const alreadyReminded = new Set(
-        prev.filter((n) => n.type === 'reminder').map((n) => n.eventId)
-      );
-      const labels = { event: 'Event', meeting: 'Meeting', health: 'Health', offday: 'Day Off' };
-      const newReminders = calendarEvents
-        .filter((e) => e.date === tomorrowStr && !alreadyReminded.has(e.id))
-        .map((e) => ({
-          id: Date.now() + Math.random(),
-          type: 'reminder',
-          title: `Reminder: ${labels[e.type] || 'Announcement'} tomorrow — ${e.title}`,
-          message: `${e.title} is scheduled for tomorrow${e.time ? ` at ${e.time}` : ''}.${e.description ? ` ${e.description}` : ''}`,
-          eventId: e.id,
-          read: false,
-          date: new Date().toLocaleString(),
+  // -----------------------------------------------------------------------
+  // FETCH EVERYTHING FROM THE API when the user logs in.
+  // Runs once after login; refetched if user changes.
+  // -----------------------------------------------------------------------
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+
+    const loadAll = async () => {
+      try {
+        const [users, children, reports, events, media, schedule, menu, notifs,
+               bumble, honey, busy] = await Promise.all([
+          usersApi.getAll().catch(() => []),
+          childrenApi.getAll().catch(() => []),
+          reportsApi.getAll().catch(() => []),
+          eventsApi.getAll().catch(() => []),
+          mediaApi.getAll().catch(() => []),
+          scheduleApi.getAll().catch(() => []),
+          menuApi.getAll().catch(() => []),
+          (user.id !== 'admin'
+            ? notificationsApi.getByUser(user.id)
+            : notificationsApi.getAll()).catch(() => []),
+          chatApi.getByGroup('Bumble Bees').catch(() => []),
+          chatApi.getByGroup('Honey Bees').catch(() => []),
+          chatApi.getByGroup('Busy Bees').catch(() => []),
+        ]);
+
+        if (cancelled) return;
+
+        // Attach childIds to each parent so existing components can use user.childIds.
+        // The API returns children with a parentId, so we build the list per-parent here.
+        const usersWithChildIds = users.map((u) => ({
+          ...u,
+          childIds: u.role === 'parent'
+            ? children.filter((c) => c.parentId === u.id).map((c) => c.id)
+            : [],
         }));
-      if (newReminders.length === 0) return prev;
-      return [...newReminders, ...prev];
-    });
-  }, [calendarEvents]);
 
-  const handleLogin = (userData) => {
-    setUser(userData);
-  };
+        setRegisteredUsers(usersWithChildIds);
+        setRegisteredChildren(children);
+        setDailyReports(reports.map(mapReport));
+        setCalendarEvents(events);
+        setMediaUploads(media);
+        // Use defaults if DB is empty so the UI is never blank
+        setWeeklySchedule(schedule.length ? schedule : defaultSchedule);
+        setWeeklyMenu(menu.length ? menu : defaultMenu);
+        setNotifications(notifs.map(mapNotification));
+        setChatMessages({
+          'Bumble Bees': bumble.map(mapChatMessage),
+          'Honey Bees': honey.map(mapChatMessage),
+          'Busy Bees': busy.map(mapChatMessage),
+        });
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('Failed to load data from API:', err.message);
+      }
+    };
+
+    loadAll();
+    return () => { cancelled = true; };
+  }, [user]);
+
+  // -----------------------------------------------------------------------
+  // HANDLERS — every "add / edit / delete" now talks to the API.
+  // After a successful API call we update local state to match.
+  // -----------------------------------------------------------------------
+
+  const handleLogin = (userData) => setUser(userData);
 
   const handleSignup = (newUser) => {
-    setRegisteredUsers([...registeredUsers, newUser]);
-    if (newUser.child) {
-      setRegisteredChildren([...registeredChildren, newUser.child]);
-    }
     setUser(newUser);
+    if (newUser.child) {
+      setRegisteredChildren((prev) => [...prev, newUser.child]);
+    }
   };
 
   const handleLogout = () => {
     setUser(null);
-    localStorage.removeItem('nestsync_user');
+    // Clear all in-memory data so the next user starts fresh
+    setRegisteredChildren([]);
+    setNotifications([]);
+    setDailyReports([]);
+    setCalendarEvents([]);
+    setMediaUploads([]);
+    setChatMessages(defaultChat);
+    setWeeklySchedule(defaultSchedule);
+    setWeeklyMenu(defaultMenu);
   };
 
-  // Reset a user's password by email. Returns true if a matching account was
-  // found and updated, false otherwise. Used by the "Forgot password?" flow on
-  // the Login page.
-  const handleResetPassword = (email, newPassword) => {
-    const target = registeredUsers.find((u) => u.email === email);
-    if (!target) return false;
-    setRegisteredUsers((prev) =>
-      prev.map((u) => (u.email === email ? { ...u, password: newPassword } : u))
-    );
-    return true;
+  // The reset-password flow now runs through authApi inside Login.jsx, so this
+  // is just here for backwards compatibility (returns true so the modal closes).
+  const handleResetPassword = () => true;
+
+  // Notifications -------------------------------------------------------
+  const addNotification = useCallback(async (notification) => {
+    try {
+      const created = await notificationsApi.create({
+        userId: notification.userId ?? null,
+        type: notification.type || '',
+        title: notification.title || '',
+        message: notification.message || '',
+        childId: notification.childId ?? null,
+        eventId: notification.eventId ?? null,
+      });
+      setNotifications((prev) => [mapNotification(created), ...prev]);
+    } catch (err) {
+      console.error('addNotification failed:', err.message);
+    }
+  }, []);
+
+  const markNotificationRead = async (id) => {
+    try {
+      await notificationsApi.markRead(id);
+      setNotifications((prev) =>
+        prev.map((n) => (n.id === id ? { ...n, read: true, isRead: true } : n))
+      );
+    } catch (err) {
+      console.error('markNotificationRead failed:', err.message);
+    }
   };
 
-  const addNotification = (notification) => {
-    setNotifications((prev) => [{ id: Date.now(), read: false, date: new Date().toLocaleString(), ...notification }, ...prev]);
+  // Daily Reports -------------------------------------------------------
+  const addDailyReport = async (report) => {
+    try {
+      const created = await reportsApi.create({
+        childId: report.childId,
+        childName: report.childName || '',
+        staffName: report.staffName || '',
+        mood: report.mood || '',
+        breakfastPortion: report.breakfast || report.breakfastPortion || '',
+        lunchPortion: report.lunch || report.lunchPortion || '',
+        snackPortion: report.snack || report.snackPortion || '',
+        notes: report.notes || '',
+        date: new Date().toISOString().slice(0, 10),
+        napFrom: report.napFrom || null,
+        napTo: report.napTo || null,
+        napNotes: report.napNotes || null,
+        diapers: (report.diapers && report.diapers.length > 0) ? report.diapers : null,
+        itemsNeeded: (report.itemsNeeded && report.itemsNeeded.length > 0) ? report.itemsNeeded : null,
+      });
+      setDailyReports((prev) => [mapReport(created), ...prev]);
+      await addNotification({
+        type: 'report',
+        title: 'New Daily Report',
+        message: `${report.staffName} sent a daily report for ${report.childName}`,
+        childId: report.childId,
+      });
+    } catch (err) {
+      console.error('addDailyReport failed:', err.message);
+    }
   };
 
-  const markNotificationRead = (id) => {
-    setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
+  // Calendar Events -----------------------------------------------------
+  const addCalendarEvent = async (event) => {
+    try {
+      const created = await eventsApi.create({
+        title: event.title,
+        description: event.description || null,
+        type: event.type || 'event',
+        date: event.date,
+        time: event.time || null,
+      });
+      setCalendarEvents((prev) => [...prev, created]);
+      const labels = { event: 'Event', meeting: 'Meeting', health: 'Health', offday: 'Day Off' };
+      await addNotification({
+        type: 'announcement',
+        title: `${labels[event.type] || 'Announcement'}: ${event.title}`,
+        message: event.description || event.title,
+      });
+    } catch (err) {
+      console.error('addCalendarEvent failed:', err.message);
+    }
   };
 
-  const addDailyReport = (report) => {
-    const newReport = { id: Date.now(), date: new Date().toISOString().slice(0, 10), ...report };
-    setDailyReports((prev) => [newReport, ...prev]);
-    addNotification({
-      type: 'report',
-      title: 'New Daily Report',
-      message: `${report.staffName} sent a daily report for ${report.childName}`,
-      childId: report.childId,
-    });
+  const editCalendarEvent = async (id, updated) => {
+    try {
+      const newEvent = await eventsApi.update(id, updated);
+      setCalendarEvents((prev) => prev.map((e) => (e.id === id ? newEvent : e)));
+    } catch (err) {
+      console.error('editCalendarEvent failed:', err.message);
+    }
   };
 
-  const addCalendarEvent = (event) => {
-    const newEvent = { id: Date.now(), ...event };
-    setCalendarEvents((prev) => [...prev, newEvent]);
-    const labels = { event: 'Event', meeting: 'Meeting', health: 'Health', offday: 'Day Off' };
-    addNotification({
-      type: 'announcement',
-      title: `${labels[event.type] || 'Announcement'}: ${event.title}`,
-      message: event.description || event.title,
-    });
+  const deleteCalendarEvent = async (id) => {
+    try {
+      await eventsApi.delete(id);
+      setCalendarEvents((prev) => prev.filter((e) => e.id !== id));
+    } catch (err) {
+      console.error('deleteCalendarEvent failed:', err.message);
+    }
   };
 
-  const editCalendarEvent = (id, updated) => {
-    setCalendarEvents((prev) => prev.map((e) => (e.id === id ? { ...e, ...updated } : e)));
+  // Media ---------------------------------------------------------------
+  const addMedia = async (media) => {
+    try {
+      const created = await mediaApi.create({
+        childId: media.childId,
+        childName: media.childName || '',
+        type: media.type || 'photo',
+        url: media.url || '',
+        caption: media.caption || '',
+        uploadedBy: media.uploadedBy || '',
+        date: new Date().toISOString().slice(0, 10),
+      });
+      setMediaUploads((prev) => [created, ...prev]);
+      await addNotification({
+        type: 'media',
+        title: `New ${media.type === 'video' ? 'Video' : 'Photo'} Uploaded`,
+        message: `${media.uploadedBy} uploaded a ${media.type} of ${media.childName}: "${media.caption}"`,
+        childId: media.childId,
+      });
+    } catch (err) {
+      console.error('addMedia failed:', err.message);
+    }
   };
 
-  const deleteCalendarEvent = (id) => {
-    setCalendarEvents((prev) => prev.filter((e) => e.id !== id));
+  const deleteMedia = async (id) => {
+    try {
+      await mediaApi.delete(id);
+      setMediaUploads((prev) => prev.filter((m) => m.id !== id));
+    } catch (err) {
+      console.error('deleteMedia failed:', err.message);
+    }
   };
 
-  const addMedia = (media) => {
-    const newMedia = { id: Date.now(), date: new Date().toISOString().slice(0, 10), ...media };
-    setMediaUploads((prev) => [newMedia, ...prev]);
-    addNotification({
-      type: 'media',
-      title: `New ${media.type === 'video' ? 'Video' : 'Photo'} Uploaded`,
-      message: `${media.uploadedBy} uploaded a ${media.type} of ${media.childName}: "${media.caption}"`,
-      childId: media.childId,
-    });
+  // Schedule / Menu — bulk save the whole array to the backend ----------
+  const updateWeeklySchedule = async (newSchedule) => {
+    try {
+      const saved = await scheduleApi.replaceAll(newSchedule);
+      setWeeklySchedule(saved);
+    } catch (err) {
+      console.error('updateWeeklySchedule failed:', err.message);
+    }
   };
 
-  const updateWeeklySchedule = (newSchedule) => {
-    setWeeklySchedule(newSchedule);
+  const updateWeeklyMenu = async (newMenu) => {
+    try {
+      const saved = await menuApi.replaceAll(newMenu);
+      setWeeklyMenu(saved);
+    } catch (err) {
+      console.error('updateWeeklyMenu failed:', err.message);
+    }
   };
 
-  const [weeklyMenu, setWeeklyMenu] = useState(() => loadState('nestsync_menu', defaultMenu));
-
-  useEffect(() => { saveState('nestsync_menu', weeklyMenu); }, [weeklyMenu]);
-
-  const updateWeeklyMenu = (newMenu) => {
-    setWeeklyMenu(newMenu);
-  };
-
-  const sendChatMessage = (group, message) => {
-    setChatMessages((prev) => ({
-      ...prev,
-      [group]: [...(prev[group] || []), { id: Date.now(), date: '2026-04-01', time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }), ...message }],
-    }));
+  // Chat ---------------------------------------------------------------
+  const sendChatMessage = async (group, message) => {
+    try {
+      const sent = await chatApi.send(group, {
+        senderName: message.senderName || message.sender || '',
+        senderRole: message.senderRole || message.role || (user?.role ?? 'parent'),
+        text: message.text || message.message || '',
+      });
+      setChatMessages((prev) => ({
+        ...prev,
+        [group]: [...(prev[group] || []), mapChatMessage(sent)],
+      }));
+    } catch (err) {
+      console.error('sendChatMessage failed:', err.message);
+    }
   };
 
   return (
     <BrowserRouter>
       <Routes>
-        {/* When someone opens /, check if they're logged in. If yes, send them to their dashboard. If no, show the Login page. */}
-        {/* path="/" → the root URL (the website's home) */}
-        {/*user ? ... : ... → a ternary: "if user is logged in, do A, otherwise do B"*/}
-        {/*A: <Navigate to={/${user.role}} replace /> → redirects to /parent, /staff, or /admin depending on role
-       B: <Login ... /> → shows the login page with these props:
-      onLogin={handleLogin} → what to call when login succeeds
-      users={[ADMIN_ACCOUNT, ...registeredUsers]} → the admin plus all registered users (login checks against this list)
-      onResetPassword={handleResetPassword} → the forgot-password function*/}
-
-        
-
-        {/*Every route follows this shape:
-        <Route path="SOME_URL" element={
-          CONDITION ? <TheCorrectPage /> : <Navigate to="/" />
-        } />
-        URL → what URL to match
-        Condition → is the user allowed here?
-        If yes → show the page
-        If no → redirect*/}
-
-        <Route path="/" element={user ? <Navigate to={`/${user.role}`} replace /> : <Login onLogin={handleLogin} users={[ADMIN_ACCOUNT, ...registeredUsers]} onResetPassword={handleResetPassword} />} />
-
-        <Route path="/signup" element={user ? <Navigate to={`/${user.role}`} replace /> : <Signup onSignup={handleSignup} registeredUsers={registeredUsers} />} />
-        {/* We pass props to ParentDashboard (and the other dashboards) because App.jsx
-            holds all the data and functions — the dashboards need them to display info
-            and update state, so App.jsx hands them down as props. */}
+        <Route
+          path="/"
+          element={user ? <Navigate to={`/${user.role}`} replace /> :
+            <Login
+              onLogin={handleLogin}
+              users={[ADMIN_ACCOUNT, ...registeredUsers]}
+              onResetPassword={handleResetPassword}
+            />}
+        />
+        <Route
+          path="/signup"
+          element={user ? <Navigate to={`/${user.role}`} replace /> :
+            <Signup onSignup={handleSignup} registeredUsers={registeredUsers} />}
+        />
         <Route
           path="/parent/*"
           element={user?.role === 'parent' ? (
@@ -350,9 +456,13 @@ function App() {
               onEditEvent={editCalendarEvent}
               onDeleteEvent={deleteCalendarEvent}
               mediaUploads={mediaUploads}
+              onAddMedia={addMedia}
+              onDeleteMedia={deleteMedia}
               chatMessages={chatMessages}
               weeklySchedule={weeklySchedule}
               weeklyMenu={weeklyMenu}
+              onUpdateSchedule={updateWeeklySchedule}
+              onUpdateMenu={updateWeeklyMenu}
               notifications={notifications}
             />
           ) : <Navigate to="/" replace />}

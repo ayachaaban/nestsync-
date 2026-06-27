@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import { authApi } from '../api';
 
 function Login({ onLogin, users, onResetPassword }) {
   const [email, setEmail] = useState('');
@@ -63,8 +64,8 @@ function Login({ onLogin, users, onResetPassword }) {
     setForgotStep('reset');
   };
 
-  // Step 3: actually update the password.
-  const handleResetSubmit = (e) => {
+  // Step 3: actually update the password (now via the API).
+  const handleResetSubmit = async (e) => {
     e.preventDefault();
     setForgotError('');
     if (!forgotNewPassword || !forgotConfirm) {
@@ -79,12 +80,12 @@ function Login({ onLogin, users, onResetPassword }) {
       setForgotError('Passwords do not match');
       return;
     }
-    const ok = onResetPassword && onResetPassword(forgotEmail, forgotNewPassword);
-    if (!ok) {
-      setForgotError('Could not update password — account no longer exists');
-      return;
+    try {
+      await authApi.resetPassword(forgotEmail, forgotNewPassword);
+      setForgotStep('done');
+    } catch (err) {
+      setForgotError(err.message || 'Could not update password');
     }
-    setForgotStep('done');
   };
 
   // Re-issue a fresh code if the user wants one.
@@ -97,14 +98,31 @@ function Login({ onLogin, users, onResetPassword }) {
 
   const allUsers = users || [];
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    const user = allUsers.find((u) => u.email === email && u.password === password);
-    if (user) {
-      onLogin(user);
-      navigate(`/${user.role}`);
-    } else {
-      setError('Invalid email or password');
+    setError('');
+
+    // STEP 1 — Try the hardcoded admin / local users first (legacy).
+    const localUser = allUsers.find((u) => u.email === email && u.password === password);
+    if (localUser) {
+      onLogin(localUser);
+      navigate(`/${localUser.role}`);
+      return;
+    }
+
+    // STEP 2 — Otherwise call the real API (the database does the password check).
+    try {
+      const user = await authApi.login(email, password);
+      // The API returns { id, name, email, role, group, children }.
+      // Our dashboards still expect a "childIds" array — derive it from "children".
+      const userWithChildIds = {
+        ...user,
+        childIds: (user.children || []).map((c) => c.id),
+      };
+      onLogin(userWithChildIds);
+      navigate(`/${userWithChildIds.role}`);
+    } catch (err) {
+      setError(err.message || 'Invalid email or password');
     }
   };
 
